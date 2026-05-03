@@ -235,10 +235,11 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         textView.allowsUndo = true
         textView.delegate = self
         textView.minSize = NSSize(width: 0, height: 110)
-        textView.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                   height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.textContainer?.containerSize = NSSize(
-            width: 460, height: .greatestFiniteMagnitude
+            width: 460, height: CGFloat.greatestFiniteMagnitude
         )
         textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
