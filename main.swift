@@ -334,8 +334,8 @@ struct GestureMappings {
     static let defaults: [GestureDirection: BrowserAction] = [
         .left:  .back,
         .right: .forward,
-        .up:    .reload,
-        .down:  .newTab,
+        .up:    .scrollTop,
+        .down:  .scrollBottom,
     ]
 
     static func action(for direction: GestureDirection) -> BrowserAction {

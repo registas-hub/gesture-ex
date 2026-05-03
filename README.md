@@ -23,12 +23,12 @@ Hold the right mouse button as long as you want, drag to a different spot, relea
 ### 4-direction mouse gestures
 Drag with right-button held in a supported browser, release to fire an action.
 
-| Default | Action  | Shortcut  |
-|---------|---------|-----------|
-| ←       | Back    | ⌘ [       |
-| →       | Forward | ⌘ ]       |
-| ↑       | Reload  | ⌘ R       |
-| ↓       | New Tab | ⌘ T       |
+| Default | Action            | Shortcut |
+|---------|-------------------|----------|
+| ←       | Back              | ⌘ [      |
+| →       | Forward           | ⌘ ]      |
+| ↑       | Scroll to Top     | Home     |
+| ↓       | Scroll to Bottom  | End      |
 
 13 actions are available out of the box: Back / Forward / Reload / Hard Reload / New Tab / Close Tab / Reopen Closed Tab / Next Tab / Previous Tab / New Window / Scroll to Top / Scroll to Bottom / Disabled.
 
@@ -106,7 +106,7 @@ The `Active:` line tells you whether the currently-frontmost app is recognized a
 | Action | Result |
 |--------|--------|
 | Right-click + 50 px **left** in Chrome | `← Back` overlay → page goes back |
-| Right-click + 80 px **down** in Safari | `↓ New Tab` overlay → new tab opens |
+| Right-click + 80 px **down** in Safari | `↓ Scroll to Bottom` overlay → page scrolls to end |
 | Right-click + draw an **L** (`↓→`), if registered | `↓→ Close Tab` (or whatever you mapped) |
 | Right-click + tiny shake | normal context menu at release position |
 | Right-click + ambiguous diagonal (↗) | silent cancel, no menu |
