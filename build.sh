@@ -14,8 +14,12 @@ echo "📦 Creating app bundle skeleton…"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
 
-echo "🔨 Compiling Swift source…"
-swiftc "$DIR/main.swift" \
+echo "🔨 Compiling Swift sources (Sources/**/*.swift)…"
+# 모든 *.swift 파일을 한 번에 swiftc에 넘겨야 한 모듈로 컴파일된다.
+# null-delimited으로 처리해 공백 포함 경로 안전.
+SOURCES=()
+while IFS= read -r -d '' f; do SOURCES+=("$f"); done < <(find "$DIR/Sources" -name '*.swift' -print0)
+swiftc "${SOURCES[@]}" \
     -o "$BIN" \
     -framework Cocoa \
     -framework ServiceManagement \
