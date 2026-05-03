@@ -10,6 +10,8 @@ final class EventTapController {
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var pendingDown: CGEvent?
+    /// down 시점에 AppFilter를 통과했는지 — up에서 같은 결정을 재사용해 일관성 보장.
+    private var lastDownPassedFilter: Bool = true
 
     private(set) var isRunning: Bool = false
 
@@ -132,6 +134,14 @@ final class EventTapController {
 
         switch type {
         case .rightMouseDown:
+            // ── App Filter — 적용 대상이 아니면 변환 없이 그대로 통과 ──
+            let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            let shouldApply = AppFilter.shouldApply(to: bundleID)
+            lastDownPassedFilter = shouldApply
+            if !shouldApply {
+                return Unmanaged.passUnretained(event)
+            }
+
             if let copy = event.copy() {
                 copy.setIntegerValueField(.eventSourceUserData, value: Self.SYNTHETIC_TAG)
                 pendingDown = copy
@@ -142,6 +152,11 @@ final class EventTapController {
             return nil  // 원본 down은 삼킴
 
         case .rightMouseUp:
+            // down 시점에 필터를 통과하지 못했으면 up도 그대로 통과 (일관성 보장)
+            if !lastDownPassedFilter {
+                return Unmanaged.passUnretained(event)
+            }
+
             // 어떤 분기로 가든 트레일은 마무리한다
             let upCb = onRightUp
             DispatchQueue.main.async { upCb?() }

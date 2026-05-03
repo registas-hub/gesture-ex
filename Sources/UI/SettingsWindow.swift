@@ -1,6 +1,6 @@
 import AppKit
 
-final class SettingsWindow: NSObject, NSWindowDelegate {
+final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     static let shared = SettingsWindow()
 
     private var window: NSWindow?
@@ -16,6 +16,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     /// Custom gesture 리스트 컨테이너 — 추가/삭제 시 동적으로 갱신.
     private weak var customListStack: NSStackView?
+
+    // App Filter 컨트롤
+    private weak var appFilterModePopup: NSPopUpButton?
+    private weak var appFilterTextView: NSTextView?
 
     /// Linger duration 드롭다운에 표시할 옵션
     private static let lingerOptions: [(label: String, value: Double)] = [
@@ -37,7 +41,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     private func buildAndShow() {
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 880),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -161,6 +165,96 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             name: .customGesturesChanged,
             object: nil
         )
+
+        // ── Application Filter 섹션 ──
+        let separator3 = NSBox()
+        separator3.boxType = .separator
+        separator3.translatesAutoresizingMaskIntoConstraints = false
+        root.addArrangedSubview(separator3)
+        separator3.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -56).isActive = true
+
+        let filterTitle = NSTextField(labelWithString: "Application Filter")
+        filterTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        root.addArrangedSubview(filterTitle)
+
+        let filterDesc = NSTextField(labelWithString:
+            "Limit which apps the right-click on mouse-up conversion applies to.")
+        filterDesc.font = .systemFont(ofSize: 11)
+        filterDesc.textColor = .secondaryLabelColor
+        root.addArrangedSubview(filterDesc)
+
+        // Mode 드롭다운
+        let modeRow = NSStackView()
+        modeRow.orientation = .horizontal
+        modeRow.spacing = 12
+        modeRow.alignment = .centerY
+
+        let modeLabel = NSTextField(labelWithString: "Mode:")
+        modeLabel.font = .systemFont(ofSize: 13)
+        modeRow.addArrangedSubview(modeLabel)
+
+        let modePopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
+        for m in AppFilterMode.allCases {
+            modePopup.addItem(withTitle: m.label)
+        }
+        if let idx = AppFilterMode.allCases.firstIndex(of: AppFilter.mode) {
+            modePopup.selectItem(at: idx)
+        }
+        modePopup.target = self
+        modePopup.action = #selector(appFilterModeChanged(_:))
+        modePopup.translatesAutoresizingMaskIntoConstraints = false
+        modePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
+        self.appFilterModePopup = modePopup
+        modeRow.addArrangedSubview(modePopup)
+        root.addArrangedSubview(modeRow)
+
+        // Patterns 텍스트 영역
+        let patternsLabel = NSTextField(labelWithString:
+            "Patterns (one per line; prefix with 'regex:' for regular expression):")
+        patternsLabel.font = .systemFont(ofSize: 11)
+        patternsLabel.textColor = .secondaryLabelColor
+        root.addArrangedSubview(patternsLabel)
+
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.heightAnchor.constraint(equalToConstant: 110).isActive = true
+        scrollView.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .lineBorder
+        scrollView.autohidesScrollers = true
+
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 110))
+        textView.string = AppFilter.patternsText
+        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.delegate = self
+        textView.minSize = NSSize(width: 0, height: 110)
+        textView.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.textContainer?.containerSize = NSSize(
+            width: 460, height: .greatestFiniteMagnitude
+        )
+        textView.textContainer?.widthTracksTextView = true
+        scrollView.documentView = textView
+        self.appFilterTextView = textView
+        root.addArrangedSubview(scrollView)
+
+        let helpLabel = NSTextField(labelWithString: """
+        Examples:
+          com.google.Chrome
+          com.apple.Safari
+          regex:^com\\.google\\..*
+          # lines starting with '#' are comments
+        """)
+        helpLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        helpLabel.textColor = .tertiaryLabelColor
+        root.addArrangedSubview(helpLabel)
 
         // Footer (Reset / Close)
         let footerSpacer = NSView()
@@ -441,6 +535,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         GestureMappings.resetToDefaults()
         OverlayPreferences.resetToDefaults()
         CustomGestureMappings.resetAll()
+        AppFilter.resetToDefaults()
         // 매핑 popup 갱신
         for (direction, popup) in popups {
             let current = GestureMappings.action(for: direction)
@@ -458,7 +553,27 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         }) {
             lingerPopup?.selectItem(at: idx)
         }
+        // App Filter 컨트롤 갱신
+        if let idx = AppFilterMode.allCases.firstIndex(of: AppFilter.mode) {
+            appFilterModePopup?.selectItem(at: idx)
+        }
+        appFilterTextView?.string = AppFilter.patternsText
         refreshCustomList()
+    }
+
+    // MARK: App Filter handlers
+
+    @objc private func appFilterModeChanged(_ sender: NSPopUpButton) {
+        let idx = sender.indexOfSelectedItem
+        guard idx >= 0, idx < AppFilterMode.allCases.count else { return }
+        AppFilter.mode = AppFilterMode.allCases[idx]
+    }
+
+    /// NSTextViewDelegate — 패턴 텍스트가 변경될 때마다 즉시 영속화.
+    func textDidChange(_ notification: Notification) {
+        guard let tv = notification.object as? NSTextView,
+              tv === appFilterTextView else { return }
+        AppFilter.patternsText = tv.string
     }
 
     @objc private func closeWindow() {
