@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>gesture-ex</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.registar.gesture-ex</string>
+
+    <key>CFBundleName</key>
+    <string>gesture-ex</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>gesture-ex</string>
+
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <!-- 메뉴바 전용: Dock 아이콘과 메인 메뉴 숨김 -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026</string>
+
+    <!-- TCC 권한 사용 사유 (Accessibility/Input Monitoring 다이얼로그에 표시) -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>우클릭 이벤트를 가로채 마우스 제스처 액션을 발사하기 위해 사용됩니다.</string>
+</dict>
+</plist>

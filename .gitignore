@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# 빌드 산출물 — 소스에서 재생성 가능하므로 추적 안 함
+gesture-ex.app/
+*.dSYM/
+
+# Xcode (혹시 향후 도입 시)
+xcuserdata/
+*.xcuserstate
+
+# Swift Package Manager (혹시 향후 도입 시)
+.build/
+.swiftpm/
+
+# 임시 파일
+*.swp
+*.tmp
+.idea/
+
+# 인증서/개인 정보 (혹시 실수로 두지 않게)
+*.p12
+*.cer
+*.pem
+
+# 로그
+*.log
