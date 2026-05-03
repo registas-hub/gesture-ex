@@ -1,6 +1,7 @@
 import Cocoa
 import CoreGraphics
 import ServiceManagement
+import Carbon.HIToolbox
 
 // MARK: - Gesture Domain Types
 
@@ -32,6 +33,7 @@ enum BrowserAction: String, CaseIterable, Codable {
     case forward
     case reload
     case hardReload
+    case stop
     case newTab
     case closeTab
     case reopenTab
@@ -40,6 +42,10 @@ enum BrowserAction: String, CaseIterable, Codable {
     case newWindow
     case scrollTop
     case scrollBottom
+    case findInPage
+    case zoomIn
+    case zoomOut
+    case resetZoom
 
     /// 발사할 가상 키코드. nil이면 액션 비활성(disabled).
     var keyCode: CGKeyCode? {
@@ -49,6 +55,7 @@ enum BrowserAction: String, CaseIterable, Codable {
         case .forward:      return 0x1E  // ]
         case .reload:       return 0x0F  // R
         case .hardReload:   return 0x0F  // Shift+R
+        case .stop:         return 0x2F  // . (period)
         case .newTab:       return 0x11  // T
         case .closeTab:     return 0x0D  // W
         case .reopenTab:    return 0x11  // Shift+T
@@ -57,6 +64,10 @@ enum BrowserAction: String, CaseIterable, Codable {
         case .newWindow:    return 0x2D  // N
         case .scrollTop:    return 0x73  // Home
         case .scrollBottom: return 0x77  // End
+        case .findInPage:   return 0x03  // F
+        case .zoomIn:       return 0x18  // = (Cmd++)
+        case .zoomOut:      return 0x1B  // - (Cmd+-)
+        case .resetZoom:    return 0x1D  // 0
         }
     }
 
@@ -64,7 +75,8 @@ enum BrowserAction: String, CaseIterable, Codable {
         switch self {
         case .disabled:
             return []
-        case .back, .forward, .reload, .newTab, .closeTab, .newWindow:
+        case .back, .forward, .reload, .stop, .newTab, .closeTab, .newWindow,
+             .findInPage, .zoomIn, .zoomOut, .resetZoom:
             return .maskCommand
         case .hardReload, .reopenTab:
             return [.maskCommand, .maskShift]
@@ -82,6 +94,7 @@ enum BrowserAction: String, CaseIterable, Codable {
         case .forward:      return "Forward"
         case .reload:       return "Reload"
         case .hardReload:   return "Hard Reload"
+        case .stop:         return "Stop Loading"
         case .newTab:       return "New Tab"
         case .closeTab:     return "Close Tab"
         case .reopenTab:    return "Reopen Closed Tab"
@@ -90,6 +103,10 @@ enum BrowserAction: String, CaseIterable, Codable {
         case .newWindow:    return "New Window"
         case .scrollTop:    return "Scroll to Top"
         case .scrollBottom: return "Scroll to Bottom"
+        case .findInPage:   return "Find in Page"
+        case .zoomIn:       return "Zoom In"
+        case .zoomOut:      return "Zoom Out"
+        case .resetZoom:    return "Reset Zoom"
         }
     }
 }
@@ -972,28 +989,52 @@ final class GestureTrailWindow {
         view.updateLiveLabel(at: local, text: labelText)
     }
 
-    /// 현재까지 캡처된 path를 분석해 패턴 + 매칭 액션을 라이브 라벨로 표시.
-    /// - 단일 방향 → GestureMappings 매핑 ("← Back")
-    /// - 다중 segment → CustomGestureMappings 매핑 ("←↑ Reload" 등)
-    /// - 비-브라우저 / 엔진 토글 OFF / 매핑 없음 / disabled → nil
+    /// 모든 제스처 상태를 라이브 오버레이 라벨로 표현한다 (사용자가 토스트 대신 오버레이만 사용 요청).
+    /// - 짧은 드래그 (< 20px) → nil (메시지 노이즈 방지)
+    /// - 비-브라우저 / 엔진 토글 OFF → "✗ Not browser: <앱명>"
+    /// - 패턴 인식 실패 (사선 등) → "✗ Ambiguous"
+    /// - 패턴 인식 + 매핑 없음 → "<패턴>  (no mapping)"
+    /// - 패턴 인식 + 매핑 disabled → "<패턴>  (disabled)"
+    /// - 정상 인식 → "<패턴>  <액션>"
     private func computeLiveLabel(currentGlobal: NSPoint) -> String? {
-        guard EventTapController.shared.gesturesEnabledForFrontmost else {
-            return nil
-        }
-        guard let pattern = PathAnalyzer.analyze(path: capturedCGPath) else {
-            return nil
+        // 거리 계산 (CGEvent 좌표계로 변환 후)
+        let startCG = GestureRecognizer.nsPointToCG(startGlobal)
+        let currentCG = GestureRecognizer.nsPointToCG(currentGlobal)
+        let dx = currentCG.x - startCG.x
+        let dy = currentCG.y - startCG.y
+        let distance = (dx * dx + dy * dy).squareRoot()
+
+        // 짧은 클릭/드래그 — 라벨 노이즈 방지
+        if distance < 20 { return nil }
+
+        // 비-브라우저 또는 엔진 토글 OFF
+        if !EventTapController.shared.gesturesEnabledForFrontmost {
+            let name = NSWorkspace.shared.frontmostApplication?.localizedName ?? "app"
+            return "✗ Not browser: \(name)"
         }
 
-        let action: BrowserAction?
-        if let custom = CustomGestureMappings.match(pattern) {
-            action = custom
-        } else if pattern.directions.count == 1 {
-            action = GestureMappings.action(for: pattern.directions[0])
-        } else {
-            action = nil  // 다중 segment지만 등록되지 않음
+        // 패턴 분석 — 실패 시 (사선·모호) 라벨로 사유 표시
+        guard let pattern = PathAnalyzer.analyze(path: capturedCGPath) else {
+            return "✗ Ambiguous"
         }
-        guard let act = action, act != .disabled else { return nil }
-        return "\(pattern.displayString)  \(act.label)"
+
+        // 매핑 조회 — custom 다중 segment 우선, 단일 방향은 기본 매핑
+        let matched: BrowserAction?
+        if let custom = CustomGestureMappings.match(pattern) {
+            matched = custom
+        } else if pattern.directions.count == 1 {
+            matched = GestureMappings.action(for: pattern.directions[0])
+        } else {
+            matched = nil
+        }
+
+        guard let action = matched else {
+            return "\(pattern.displayString)  (no mapping)"
+        }
+        if action == .disabled {
+            return "\(pattern.displayString)  (disabled)"
+        }
+        return "\(pattern.displayString)  \(action.label)"
     }
 
     private func endInternal() {
@@ -1021,6 +1062,63 @@ final class GestureTrailWindow {
                 self?.trailView = nil
             }
         })
+    }
+}
+
+// MARK: - Global Hotkey (Carbon RegisterEventHotKey)
+
+/// macOS 글로벌 hotkey를 Carbon API로 등록한다.
+/// NSEvent.addGlobalMonitorForEvents와 달리 키 입력을 **가로채서** 다른 앱으로 전파되지 않게 한다.
+/// 우리는 ⌥⌘G로 메인 토글(우클릭→mouse-up 변환)을 ON/OFF 한다.
+final class HotkeyManager {
+    static let shared = HotkeyManager()
+
+    private static let signature: OSType = OSType(0x67657820)  // "gex "
+    private var hotKeyRef: EventHotKeyRef?
+    private var eventHandlerRef: EventHandlerRef?
+    private var handler: (() -> Void)?
+
+    /// keyCode/modifiers는 Carbon의 kVK_ANSI_*, cmdKey/optionKey 등.
+    func register(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
+        unregister()
+        self.handler = action
+
+        // Event handler 한 번만 설치 (재등록해도 재설치 안 함)
+        if eventHandlerRef == nil {
+            var spec = EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind:  UInt32(kEventHotKeyPressed)
+            )
+            InstallEventHandler(
+                GetApplicationEventTarget(),
+                { _, _, userData -> OSStatus in
+                    guard let userData = userData else { return noErr }
+                    let mgr = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+                    DispatchQueue.main.async { mgr.handler?() }
+                    return noErr
+                },
+                1, &spec,
+                Unmanaged.passUnretained(self).toOpaque(),
+                &eventHandlerRef
+            )
+        }
+
+        let id = EventHotKeyID(signature: Self.signature, id: 1)
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            keyCode, modifiers, id,
+            GetApplicationEventTarget(), 0, &ref
+        )
+        if status == noErr {
+            self.hotKeyRef = ref
+        }
+    }
+
+    func unregister() {
+        if let ref = hotKeyRef {
+            UnregisterEventHotKey(ref)
+            hotKeyRef = nil
+        }
     }
 }
 
@@ -1882,6 +1980,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activeAppItem: NSMenuItem!
     private var chromiumGesturesItem: NSMenuItem!
     private var webkitGesturesItem: NSMenuItem!
+    private var customizeItem: NSMenuItem!
+    private var gesturesSectionHeader: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1893,16 +1993,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             EventTapController.shared.isEnabled = true
         }
 
-        // 성공 토스트는 더 이상 띄우지 않는다 — 라이브 라벨(트레일 오버레이)이
-        // 사용자가 떼기 직전까지 동일 정보를 보여주고 있으므로 중복 피드백.
-        // 실패 토스트는 라이브 라벨이 hidden 상태(인식 실패)라서 유일한 진단 채널이라 유지.
-        EventTapController.shared.onGestureSkipped = { reason in
-            switch reason {
-            case .notChromium(_, let appName):
-                GestureToast.shared.show("✗ Not browser: \(appName ?? "?")")
-            case .ambiguousDirection(let d):
-                GestureToast.shared.show("✗ Ambiguous (\(Int(d))px)")
-            }
+        // 후행 토스트는 모두 제거 — 모든 메시지(성공/실패/사유)는 라이브 오버레이에 표시한다.
+        // GestureToast 클래스는 향후 다른 용도로 쓸 수 있어 보존.
+
+        // 글로벌 hotkey ⌥⌘G — 어디서나 mouse-up 변환 토글
+        HotkeyManager.shared.register(
+            keyCode: UInt32(kVK_ANSI_G),
+            modifiers: UInt32(cmdKey | optionKey)
+        ) { [weak self] in
+            self?.toggleEnabled()
         }
 
         // 우클릭 down/up 시점에 화면 트레일 오버레이 표시 / 숨김
@@ -1970,37 +2069,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // 메인 토글 — 모든 기능의 전제 조건. 글로벌 hotkey ⌥⌘G로도 토글 가능.
         toggleItem = NSMenuItem(
             title: "Enable right-click on mouse-up",
             action: #selector(toggleEnabled),
-            keyEquivalent: "e"
+            keyEquivalent: "g"
         )
+        toggleItem.keyEquivalentModifierMask = [.command, .option]
         toggleItem.target = self
         menu.addItem(toggleItem)
 
+        // 제스처 섹션 (mouse-up 의존) — 시각적으로 분리·indent로 위계 표현
+        gesturesSectionHeader = NSMenuItem(title: "Browser Gestures",
+                                            action: nil, keyEquivalent: "")
+        gesturesSectionHeader.isEnabled = false
+        menu.addItem(gesturesSectionHeader)
+
         chromiumGesturesItem = NSMenuItem(
-            title: "Gestures: Chromium",
+            title: "Chromium (Chrome / Edge / Brave / Arc / …)",
             action: #selector(toggleChromiumGestures),
             keyEquivalent: ""
         )
         chromiumGesturesItem.target = self
+        chromiumGesturesItem.indentationLevel = 1
         menu.addItem(chromiumGesturesItem)
 
         webkitGesturesItem = NSMenuItem(
-            title: "Gestures: WebKit (Safari)",
+            title: "WebKit (Safari / Safari TP / Orion)",
             action: #selector(toggleWebkitGestures),
             keyEquivalent: ""
         )
         webkitGesturesItem.target = self
+        webkitGesturesItem.indentationLevel = 1
         menu.addItem(webkitGesturesItem)
 
-        let customizeItem = NSMenuItem(
+        customizeItem = NSMenuItem(
             title: "Customize Gestures…",
             action: #selector(showSettings),
             keyEquivalent: ","
         )
         customizeItem.keyEquivalentModifierMask = [.command, .shift]
         customizeItem.target = self
+        customizeItem.indentationLevel = 1
         menu.addItem(customizeItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -2048,6 +2158,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toggleItem.state = enabled ? .on : .off
         chromiumGesturesItem.state = EventTapController.shared.chromiumGesturesEnabled ? .on : .off
         webkitGesturesItem.state = EventTapController.shared.webkitGesturesEnabled ? .on : .off
+
+        // 제스처 설정은 mouse-up 변환이 ON일 때만 의미가 있다 (기능 의존성).
+        // OFF면 위계상 하위인 제스처 항목들을 비활성화해 사용자 혼란 방지.
+        let gesturesAvailable = enabled && running
+        chromiumGesturesItem.isEnabled = gesturesAvailable
+        webkitGesturesItem.isEnabled = gesturesAvailable
+        customizeItem.isEnabled = gesturesAvailable
+
+        // 섹션 헤더 — 의존성 상태에 따라 라벨에 hint 부착
+        if !enabled {
+            gesturesSectionHeader.title = "Browser Gestures (enable above first)"
+        } else if !running {
+            gesturesSectionHeader.title = "Browser Gestures (no permission)"
+        } else {
+            gesturesSectionHeader.title = "Browser Gestures"
+        }
 
         let statusText: String
         if !enabled {
@@ -2143,9 +2269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         macOS 우클릭을 마우스 떼는 시점(mouse-up)에 발사하도록 변환합니다.
 
         Chromium 계열(Chrome / Edge / Brave / Arc / Whale / Vivaldi / Opera 등) 및
-        WebKit 계열(Safari / Safari TP / Orion) 브라우저에서 4방향 마우스 제스처를 지원합니다.
-        매핑은 Customize Gestures… 에서 변경 가능.
+        WebKit 계열(Safari / Safari TP / Orion) 브라우저에서 4방향 + 사용자 정의 다중 segment
+        마우스 제스처를 지원합니다. 매핑은 Customize Gestures…(⇧⌘,)에서 변경 가능.
 
+        Global hotkey: ⌥⌘G — anywhere to toggle on/off
         HID 이벤트 탭 사용. 필요 권한: Accessibility + Input Monitoring.
         """
         alert.runModal()
