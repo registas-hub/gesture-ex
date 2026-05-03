@@ -219,7 +219,7 @@ Stable code-signing identity means the rebuilt binary has the same code-signing 
 - **Self-signed certificate over ad-hoc** — ad-hoc signing changes `cdhash` every build, forcing TCC re-authorization. A stable cert keeps the same TCC identity across rebuilds without enrolling in Apple Developer Program.
 - **`nonactivatingPanel` for overlays** — prevents the trail/label from stealing focus from the frontmost browser, which would otherwise route synthesized keystrokes back to `gesture-ex` itself.
 - **60 Hz `NSEvent.mouseLocation` polling** — cheaper than another full event-tap subscription for `mouseMoved`, and sufficient for visual smoothness at any display refresh rate.
-- **`includeIf` git config** — repository lives under `~/IdeaProjects/registar-hub/`, so a personal git identity activates automatically. Not visible in the repo, but documented here for contributors.
+- **`includeIf` git config** — repository lives under `~/IdeaProjects/registas-hub/`, so a personal git identity activates automatically. Not visible in the repo, but documented here for contributors.
 
 ### Adding a new action
 
@@ -235,7 +235,7 @@ Append the bundle ID to `BrowserDetector.chromiumBundles` or `webkitBundles`.
 
 ## License
 
-TBD — pick one before publishing widely (MIT / Apache-2.0 / etc.)
+[MIT](./LICENSE) © Registas
 
 ## Author
 
