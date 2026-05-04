@@ -11,6 +11,10 @@ IDENTITY="${SIGNING_IDENTITY:-RightClickOnUpDev}"
 P12="$DIR/$IDENTITY.p12"
 B64="$DIR/$IDENTITY.p12.base64"
 
+# 어떤 종료 경로로든 .p12 / .base64를 자동 삭제 — 디스크에 cert가 남아 누출되는 사고를 차단.
+# manual secret 등록 분기는 사용자가 등록을 마칠 때까지 read로 대기시키므로 cleanup이 너무 일찍 일어나지 않는다.
+trap 'rm -f "$P12" "$B64"' EXIT
+
 if ! security find-identity -p codesigning login.keychain-db | grep -q "\"$IDENTITY\""; then
     echo "❌ '$IDENTITY' identity가 login.keychain에 없습니다."
     echo "   먼저 ./create-signing-cert.sh로 생성하세요."
@@ -41,12 +45,11 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
 else
     echo "  ⚠️  gh CLI 미설치 또는 미로그인 — 수동 등록 필요:"
     echo "    Settings → Secrets and variables → Actions → New repository secret"
-    echo "      SIGNING_CERT_P12_BASE64 = (내용: $B64 의 전체 텍스트)"
+    echo "      SIGNING_CERT_P12_BASE64 = (다음 파일의 전체 텍스트: $B64)"
     echo "      SIGNING_CERT_PASSWORD   = (위에서 입력한 password)"
+    read -p "  등록을 마쳤으면 ENTER (자동 cleanup 진행)…" _
 fi
 
 echo ""
-echo "🧹 임시 파일 정리:"
-echo "    rm -f \"$P12\" \"$B64\""
-echo ""
+echo "🧹 임시 .p12 / .base64 자동 삭제됨 (trap on EXIT)"
 echo "✅ 다음 'git push --tags' 시 release workflow가 이 cert로 서명합니다."
