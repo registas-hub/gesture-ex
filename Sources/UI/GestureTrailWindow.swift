@@ -250,8 +250,11 @@ final class GestureTrailWindow {
     }
 
     /// 모든 제스처 상태를 라이브 오버레이 라벨로 표현한다 (사용자가 토스트 대신 오버레이만 사용 요청).
+    /// 분기 흐름은 EventTapController의 mouse-up 분기와 일치해야 한다.
     /// - 짧은 드래그 (< 20px) → nil (메시지 노이즈 방지)
-    /// - 비-브라우저 / 엔진 토글 OFF → "✗ Not browser: <앱명>"
+    /// - Gesture Apps 필터로 차단된 앱 → nil (사용자가 명시적으로 제스처를 끈 영역)
+    /// - 화이트리스트 IN: 엔진 체크 건너뛰고 패턴 분석으로 진행
+    /// - 비-브라우저 + 화이트리스트 X → "✗ Not browser: <앱명>"
     /// - 패턴 인식 실패 (사선 등) → "✗ Ambiguous"
     /// - 패턴 인식 + 매핑 없음 → "<패턴>  (no mapping)"
     /// - 패턴 인식 + 매핑 disabled → "<패턴>  (disabled)"
@@ -267,9 +270,18 @@ final class GestureTrailWindow {
         // 짧은 클릭/드래그 — 라벨 노이즈 방지
         if distance < 20 { return nil }
 
-        // 비-브라우저 또는 엔진 토글 OFF
-        if !EventTapController.shared.gesturesEnabledForFrontmost {
-            let name = NSWorkspace.shared.frontmostApplication?.localizedName ?? "app"
+        let app = NSWorkspace.shared.frontmostApplication
+        let bundleID = app?.bundleIdentifier
+
+        // Gesture Apps 필터로 차단된 앱은 EventTapController가 silent cancel 하므로 라벨도 숨긴다.
+        guard GestureAppFilter.shouldApply(to: bundleID) else {
+            return nil
+        }
+
+        // 화이트리스트 IN이 아니라면 엔진 체크가 결정한다.
+        let explicitlyAllowed = GestureAppFilter.isExplicitlyAllowed(bundleID: bundleID)
+        if !explicitlyAllowed && !EventTapController.shared.gesturesEnabledForFrontmost {
+            let name = app?.localizedName ?? "app"
             return "✗ Not browser: \(name)"
         }
 

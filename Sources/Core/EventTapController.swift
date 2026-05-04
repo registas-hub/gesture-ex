@@ -180,21 +180,12 @@ final class EventTapController {
             }
 
             // 의도적 드래그였음 — Gesture Apps 필터 → 엔진 체크 순으로 평가한다.
-            //
-            // Gesture Apps 모드별 동작 (옵션 A):
-            //   • all:           shouldApply=true → 엔진 체크가 결정
-            //   • whitelist+IN:  shouldApply=true, isExplicitlyAllowed=true → 엔진 체크 우회·바로 발사
-            //   • whitelist+OUT: shouldApply=false → skip
-            //   • blacklist+IN:  shouldApply=false → skip
-            //   • blacklist+OUT: shouldApply=true → 엔진 체크가 결정 (기존 동작)
-            //
-            // 화이트리스트 등록 앱은 비-브라우저여도 엔진 체크를 건너뛰고 키스트로크 합성한다.
+            // 어느 분기든 드래그 ≥ 10px 단계까지 왔으면 사용자 의도는 "제스처 시도"였으므로
+            // 컨텍스트 메뉴는 띄우지 않고 silent cancel 한다 (분기 4/5와 동일 정책).
             let app = NSWorkspace.shared.frontmostApplication
             let bundleID = app?.bundleIdentifier
             guard GestureAppFilter.shouldApply(to: bundleID) else {
-                down.location = upLoc
-                down.post(tap: .cghidEventTap)
-                return Unmanaged.passUnretained(event)
+                return nil
             }
             if !GestureAppFilter.isExplicitlyAllowed(bundleID: bundleID) {
                 guard gesturesEnabledForFrontmost else {
@@ -202,9 +193,7 @@ final class EventTapController {
                     DispatchQueue.main.async {
                         cb?(.notChromium(bundleID: bundleID, appName: app?.localizedName))
                     }
-                    down.location = upLoc
-                    down.post(tap: .cghidEventTap)
-                    return Unmanaged.passUnretained(event)
+                    return nil
                 }
             }
 
@@ -243,12 +232,10 @@ final class EventTapController {
                 return nil
             }
 
-            // 매핑이 명시적으로 Disabled인 경우 → 사용자 의도가 "이 방향은 메뉴 띄움"
-            // 이 케이스만 의도적으로 컨텍스트 메뉴를 띄운다.
+            // 매핑이 .disabled여도 드래그였던 이상 메뉴를 띄우지 않는다.
+            // (드래그 = 제스처 시도이므로 우클릭 메뉴 발사는 일관되게 차단)
             if action.isDisabled {
-                down.location = upLoc
-                down.post(tap: .cghidEventTap)
-                return Unmanaged.passUnretained(event)
+                return nil
             }
 
             ActionExecutor.execute(action)
