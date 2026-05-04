@@ -99,17 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // 메인 토글 — 모든 기능의 전제 조건. 글로벌 hotkey ⌥⌘G로도 토글 가능.
-        toggleItem = NSMenuItem(
-            title: "Enable right-click on mouse-up",
-            action: #selector(toggleEnabled),
-            keyEquivalent: "g"
-        )
-        toggleItem.keyEquivalentModifierMask = [.command, .option]
-        toggleItem.target = self
-        menu.addItem(toggleItem)
-
-        // 제스처 섹션 (mouse-up 의존) — 시각적으로 분리·indent로 위계 표현
+        // 제스처 섹션 — 토글 ON 시 mouse-up이 자동으로 함께 켜진다.
         gesturesSectionHeader = NSMenuItem(title: "Browser Gestures",
                                             action: nil, keyEquivalent: "")
         gesturesSectionHeader.isEnabled = false
@@ -133,14 +123,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webkitGesturesItem.indentationLevel = 1
         menu.addItem(webkitGesturesItem)
 
+        menu.addItem(NSMenuItem.separator())
+
+        // mouse-up 변환 토글 — 글로벌 hotkey ⌥⌘G로도 토글 가능.
+        toggleItem = NSMenuItem(
+            title: "Enable right-click on mouse-up",
+            action: #selector(toggleEnabled),
+            keyEquivalent: "g"
+        )
+        toggleItem.keyEquivalentModifierMask = [.command, .option]
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         customizeItem = NSMenuItem(
-            title: "Customize Gestures…",
+            title: "Open Config…",
             action: #selector(showSettings),
             keyEquivalent: ","
         )
         customizeItem.keyEquivalentModifierMask = [.command, .shift]
         customizeItem.target = self
-        customizeItem.indentationLevel = 1
         menu.addItem(customizeItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -189,16 +192,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         chromiumGesturesItem.state = EventTapController.shared.chromiumGesturesEnabled ? .on : .off
         webkitGesturesItem.state = EventTapController.shared.webkitGesturesEnabled ? .on : .off
 
-        // 제스처 설정은 mouse-up 변환이 ON일 때만 의미가 있다 (기능 의존성).
-        // OFF면 위계상 하위인 제스처 항목들을 비활성화해 사용자 혼란 방지.
-        let gesturesAvailable = enabled && running
-        chromiumGesturesItem.isEnabled = gesturesAvailable
-        webkitGesturesItem.isEnabled = gesturesAvailable
-        customizeItem.isEnabled = gesturesAvailable
+        // 브라우저 제스처 토글은 항상 클릭 가능하다. 켜면 mouse-up이 자동으로 함께 활성화된다.
+        chromiumGesturesItem.isEnabled = true
+        webkitGesturesItem.isEnabled = true
+        customizeItem.isEnabled = true
 
-        // 섹션 헤더 — 의존성 상태에 따라 라벨에 hint 부착
+        // 섹션 헤더 — mouse-up OFF 또는 권한 부족 상태를 명시해 inert 상태를 인지시킨다.
+        // 체크마크는 영속 의도값을 보여주지만, master/권한이 없으면 실제로는 동작하지 않으므로 단서가 필요하다.
         if !enabled {
-            gesturesSectionHeader.title = "Browser Gestures (enable above first)"
+            gesturesSectionHeader.title = "Browser Gestures (mouse-up off)"
         } else if !running {
             gesturesSectionHeader.title = "Browser Gestures (no permission)"
         } else {
@@ -255,13 +257,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleChromiumGestures() {
-        EventTapController.shared.chromiumGesturesEnabled.toggle()
-        updateMenuStateUI()
+        let willEnable = !EventTapController.shared.chromiumGesturesEnabled
+        EventTapController.shared.chromiumGesturesEnabled = willEnable
+        ensureMouseUpEnabledIfNeeded(turningOn: willEnable)
     }
 
     @objc private func toggleWebkitGestures() {
-        EventTapController.shared.webkitGesturesEnabled.toggle()
-        updateMenuStateUI()
+        let willEnable = !EventTapController.shared.webkitGesturesEnabled
+        EventTapController.shared.webkitGesturesEnabled = willEnable
+        ensureMouseUpEnabledIfNeeded(turningOn: willEnable)
+    }
+
+    /// 브라우저 제스처를 켤 때 mouse-up이 꺼져 있거나 tap이 동작 중이 아니면 활성화한다.
+    /// 권한 부족 등으로 start()가 실패하면 *자동 활성화*한 isEnabled는 롤백한다 —
+    /// 사용자가 명시적으로 켠 게 아닌 master 상태가 영속되는 부작용을 방지하기 위함.
+    private func ensureMouseUpEnabledIfNeeded(turningOn: Bool) {
+        defer { updateMenuStateUI() }
+        let ctrl = EventTapController.shared
+        guard turningOn else { return }
+        if ctrl.isEnabled && ctrl.isRunning { return }
+
+        let didAutoEnable = !ctrl.isEnabled
+        if didAutoEnable {
+            ctrl.isEnabled = true
+        }
+        if !ctrl.start() {
+            if didAutoEnable {
+                ctrl.isEnabled = false
+            }
+            showPermissionAlert()
+        }
     }
 
     @objc private func showSettings() {
@@ -300,7 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         Chromium 계열(Chrome / Edge / Brave / Arc / Whale / Vivaldi / Opera 등) 및
         WebKit 계열(Safari / Safari TP / Orion) 브라우저에서 4방향 + 사용자 정의 다중 segment
-        마우스 제스처를 지원합니다. 매핑은 Customize Gestures…(⇧⌘,)에서 변경 가능.
+        마우스 제스처를 지원합니다. 매핑은 Open Config…(⇧⌘,)에서 변경 가능.
 
         Global hotkey: ⌥⌘G — anywhere to toggle on/off
         HID 이벤트 탭 사용. 필요 권한: Accessibility + Input Monitoring.
