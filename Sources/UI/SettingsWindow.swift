@@ -260,6 +260,20 @@ final class SettingsWindow: NSObject,
         resetButton.contentTintColor = .systemRed
         footer.addArrangedSubview(resetButton)
 
+        let importButton = NSButton(
+            title: "Import…",
+            target: self,
+            action: #selector(importConfigRequested)
+        )
+        footer.addArrangedSubview(importButton)
+
+        let exportButton = NSButton(
+            title: "Export…",
+            target: self,
+            action: #selector(exportConfigRequested)
+        )
+        footer.addArrangedSubview(exportButton)
+
         let flexible = NSView()
         flexible.translatesAutoresizingMaskIntoConstraints = false
         flexible.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1166,14 +1180,10 @@ final class SettingsWindow: NSObject,
             resetBtn.hasDestructiveAction = true
         }
         alert.addButton(withTitle: "Cancel")
-        if let window = window {
-            alert.beginSheetModal(for: window) { [weak self] response in
-                if response == .alertFirstButtonReturn {
-                    self?.performResetToDefaults()
-                }
+        present(alert) { [weak self] response in
+            if response == .alertFirstButtonReturn {
+                self?.performResetToDefaults()
             }
-        } else if alert.runModal() == .alertFirstButtonReturn {
-            performResetToDefaults()
         }
     }
 
@@ -1185,6 +1195,14 @@ final class SettingsWindow: NSObject,
         GestureAppFilter.resetToDefaults()
         BrowserPreferences.resetToDefaults()
         HotkeyPreferences.resetToDefaults()
+        refreshAllControlsFromStorage(collapseAdvanced: true)
+    }
+
+    /// 모든 페이지 컨트롤을 현재 UserDefaults 값으로 다시 그린다.
+    /// Reset(전 설정 일괄 변경) / Import(외부 스냅샷 적용) 양쪽에서 공통으로 사용한다.
+    /// `collapseAdvanced`는 두 bundle filter 페이지의 접기 패널을 기본 상태(접힘)로 되돌릴지 — Reset 기본 동작이며,
+    /// Import는 사용자가 펴 둔 상태를 굳이 건드리지 않는다.
+    private func refreshAllControlsFromStorage(collapseAdvanced: Bool) {
         // 매핑 popup 갱신
         for (direction, popup) in popups {
             BrowserActionPopup.select(GestureMappings.action(for: direction), in: popup)
@@ -1210,18 +1228,127 @@ final class SettingsWindow: NSObject,
             gestureFilterControls.modePopup?.selectItem(at: idx)
         }
         gestureFilterControls.textView?.string = GestureAppFilter.patternsText
-        // Browser List 체크박스를 모두 ON으로 (disabled 셋이 비었으므로)
+        // Browser List 체크박스 갱신 — 현재 disabled 셋에 있으면 OFF.
+        let disabled = BrowserPreferences.disabledBundleIDs
         for cb in browserCheckboxes {
-            cb.state = .on
+            if let bundleID = cb.identifier?.rawValue {
+                cb.state = disabled.contains(bundleID) ? .off : .on
+            }
         }
-        // Advanced patterns 영역도 접힌 기본 상태로 복원 —
-        // disclosure 상태와 영역 표시 여부의 일관성을 유지한다.
-        // chevron 이미지는 alternateImage가 시스템적으로 토글하므로 별도 라벨 갱신 불필요.
-        for controls in [appFilterControls, gestureFilterControls] {
-            controls.disclosure?.state = .off
-            controls.advancedStack?.isHidden = true
+        if collapseAdvanced {
+            // chevron 이미지는 alternateImage가 시스템적으로 토글하므로 별도 라벨 갱신 불필요.
+            for controls in [appFilterControls, gestureFilterControls] {
+                controls.disclosure?.state = .off
+                controls.advancedStack?.isHidden = true
+            }
         }
         refreshCustomList()
+    }
+
+    // MARK: - Import / Export
+
+    @objc private func exportConfigRequested() {
+        let panel = NSSavePanel()
+        panel.title = "Export Configuration"
+        panel.nameFieldStringValue = defaultExportFilename()
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [.json]
+        } else {
+            panel.allowedFileTypes = ["json"]
+        }
+        panel.canCreateDirectories = true
+
+        present(panel) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.performExport(to: url)
+        }
+    }
+
+    @objc private func importConfigRequested() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Configuration"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [.json]
+        } else {
+            panel.allowedFileTypes = ["json"]
+        }
+
+        present(panel) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.confirmAndPerformImport(from: url)
+        }
+    }
+
+    private func performExport(to url: URL) {
+        do {
+            try ConfigIO.save(to: url)
+        } catch {
+            presentError(title: "Export failed", message: errorMessage(error))
+        }
+    }
+
+    private func confirmAndPerformImport(from url: URL) {
+        let snap: ConfigSnapshot
+        do {
+            snap = try ConfigIO.load(from: url)
+        } catch {
+            presentError(title: "Import failed", message: errorMessage(error))
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Import this configuration?"
+        alert.informativeText = """
+        Your current settings will be overwritten with the values from the selected file. This cannot be undone.
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+        present(alert) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            ConfigIO.apply(snap)
+            self?.refreshAllControlsFromStorage(collapseAdvanced: false)
+        }
+    }
+
+    private func defaultExportFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "gesture-ex-config-\(formatter.string(from: Date())).json"
+    }
+
+    private func presentError(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        present(alert)
+    }
+
+    /// 시트 부착 가능한 윈도우가 있으면 시트로, 아니면 modal로 표시. NSSavePanel/NSOpenPanel 공통.
+    private func present(_ panel: NSSavePanel,
+                         completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(panel.runModal())
+        }
+    }
+
+    /// NSAlert 버전. completion 기본값으로 fire-and-forget 케이스도 커버.
+    private func present(_ alert: NSAlert,
+                         completion: @escaping (NSApplication.ModalResponse) -> Void = { _ in }) {
+        if let window = window {
+            alert.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(alert.runModal())
+        }
+    }
+
+    private func errorMessage(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
     // MARK: - Bundle ID filter handlers (Mouse-up Apps · Gesture Apps)
