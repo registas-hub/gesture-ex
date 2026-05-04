@@ -329,8 +329,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showAbout() {
+        let info = Bundle.main.infoDictionary
+        let version = (info?["CFBundleShortVersionString"] as? String) ?? "dev"
         let alert = NSAlert()
-        alert.messageText = "gesture-ex"
+        alert.messageText = "gesture-ex \(version)"
         alert.informativeText = """
         Right-click on mouse-up + browser mouse gestures
         for Chromium and WebKit.

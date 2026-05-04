@@ -28,6 +28,15 @@ swiftc "${SOURCES[@]}" \
 echo "📝 Installing Info.plist…"
 cp "$DIR/Info.plist" "$APP/Contents/Info.plist"
 
+# About 다이얼로그가 보여줄 버전을 git tag에서 주입한다.
+# 정확한 tag 위에 있으면 v0.5.0 → 0.5.0, tag 이후 커밋이 있으면 0.5.0-3-gabc1234,
+# dirty면 -dirty 접미사. tag가 하나도 없거나 git이 없으면 "dev"로 폴백.
+RAW_VERSION=$(git -C "$DIR" describe --tags --always --dirty 2>/dev/null || echo "dev")
+APP_VERSION="${RAW_VERSION#v}"
+echo "🔖 App version: $APP_VERSION"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$APP/Contents/Info.plist"
+
 if [ -f "$DIR/Resources/AppIcon.icns" ]; then
     echo "🎨 Installing AppIcon.icns…"
     cp "$DIR/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
