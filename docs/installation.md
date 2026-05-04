@@ -13,12 +13,13 @@ After install, jump to [Grant permissions](#grant-permissions).
 ## Install with Homebrew
 
 ```bash
-brew install --cask --no-quarantine registas-hub/tap/gesture-ex
+brew install --cask registas-hub/tap/gesture-ex
+xattr -dr com.apple.quarantine /Applications/gesture-ex.app
 ```
 
-`--no-quarantine` skips Gatekeeper because the app is self-signed (not Apple Developer ID). Without it, macOS will block the first launch with the same dialog as a manual download — recover via the steps in [Download a pre-built release](#download-a-pre-built-release).
+The app is self-signed (not Apple Developer ID) and not notarized, so macOS quarantines the bundle Homebrew downloads. The second line strips that quarantine flag so the first launch isn't blocked by Gatekeeper. (Older guides used `brew install --cask --no-quarantine` — Homebrew 4.5 removed that switch; the manual `xattr` step replaces it.) GUI fallback: double-click, dismiss the warning, then **System Settings → Privacy & Security → Open Anyway**.
 
-Upgrade with `brew upgrade --cask gesture-ex`. Uninstall with `brew uninstall --cask gesture-ex`.
+Upgrade with `brew upgrade --cask gesture-ex`. Uninstall with `brew uninstall --cask gesture-ex`. Re-run the `xattr` line after each upgrade — Homebrew re-quarantines the new build.
 
 The cask lives at [registas-hub/homebrew-tap](https://github.com/registas-hub/homebrew-tap). Each release auto-publishes its `version` / `sha256` / `url` to the release notes, and the tap is updated separately.
 
@@ -47,16 +48,14 @@ The cask lives at [registas-hub/homebrew-tap](https://github.com/registas-hub/ho
 ### Build & run
 
 ```bash
-# 1. (One-time) generate self-signed code signing cert.
-#    Without this, TCC permissions reset on every rebuild.
-./create-signing-cert.sh
-
-# 2. Build
+# 1. Build
 ./build.sh
 
-# 3. Launch
+# 2. Launch
 open gesture-ex.app
 ```
+
+> Note: TCC permissions persist across rebuilds only if the build is signed with a stable identity (`RightClickOnUpDev`). The cert isn't checked into the repo — generate one yourself with `openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=RightClickOnUpDev" -addext "extendedKeyUsage=codeSigning"` and import it into your login keychain. Without this, `build.sh` falls back to ad-hoc signing and TCC re-prompts on every rebuild.
 
 ## Grant permissions
 
