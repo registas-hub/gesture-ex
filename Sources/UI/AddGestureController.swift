@@ -1,15 +1,31 @@
 import AppKit
 
+/// 액션 종류 — 빌트인 BrowserAction과 사용자 정의 단축키를 분기.
+private enum ActionKind: Int {
+    case builtin = 0
+    case shortcut = 1
+}
+
 final class AddGestureController: NSObject, NSWindowDelegate {
     static let shared = AddGestureController()
 
     private var window: NSWindow?
     private var captureView: GestureCaptureView?
     private weak var patternLabel: NSTextField?
+    private weak var actionKindPopup: NSPopUpButton?
     private weak var actionPopup: NSPopUpButton?
+    private weak var actionRow: NSStackView?
+    private weak var shortcutRow: NSStackView?
+    private weak var shortcutLabel: NSTextField?
+    private weak var shortcutRecordButton: NSButton?
     private weak var saveButton: NSButton?
+    private weak var cancelButton: NSButton?
 
     private var capturedPattern: GesturePattern?
+    private var capturedShortcut: KeyShortcut?
+
+    /// 단축키 녹화 모드일 때 활성된 NSEvent monitor.
+    private var keyMonitor: Any?
 
     /// disabled 제외한 액션 목록 — 사용자가 disabled를 등록하는 건 의미 없음
     private let actionChoices: [BrowserAction] = BrowserAction.allCases.filter { $0 != .disabled }
@@ -25,7 +41,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
 
     private func buildAndShow() {
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 540),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -37,6 +53,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         w.center()
         self.window = w
         clearCapture()
+        applyActionKind(.builtin)
 
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -88,7 +105,31 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         patternRow.addArrangedSubview(pLabel)
         root.addArrangedSubview(patternRow)
 
-        // Action popup
+        // Action kind selector
+        let kindRow = NSStackView()
+        kindRow.orientation = .horizontal
+        kindRow.spacing = 10
+        kindRow.alignment = .centerY
+
+        let kindHead = NSTextField(labelWithString: "Type:")
+        kindHead.font = .systemFont(ofSize: 13)
+        kindHead.textColor = .secondaryLabelColor
+        kindRow.addArrangedSubview(kindHead)
+
+        let kindPopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
+        kindPopup.addItem(withTitle: "Built-in Action")
+        kindPopup.item(at: 0)?.tag = ActionKind.builtin.rawValue
+        kindPopup.addItem(withTitle: "Custom Shortcut")
+        kindPopup.item(at: 1)?.tag = ActionKind.shortcut.rawValue
+        kindPopup.target = self
+        kindPopup.action = #selector(actionKindChanged(_:))
+        kindPopup.translatesAutoresizingMaskIntoConstraints = false
+        kindPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        self.actionKindPopup = kindPopup
+        kindRow.addArrangedSubview(kindPopup)
+        root.addArrangedSubview(kindRow)
+
+        // Built-in action popup row
         let actionRow = NSStackView()
         actionRow.orientation = .horizontal
         actionRow.spacing = 10
@@ -107,7 +148,36 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
         self.actionPopup = popup
         actionRow.addArrangedSubview(popup)
+        self.actionRow = actionRow
         root.addArrangedSubview(actionRow)
+
+        // Custom shortcut row
+        let shortcutRow = NSStackView()
+        shortcutRow.orientation = .horizontal
+        shortcutRow.spacing = 10
+        shortcutRow.alignment = .centerY
+
+        let shortcutHead = NSTextField(labelWithString: "Shortcut:")
+        shortcutHead.font = .systemFont(ofSize: 13)
+        shortcutHead.textColor = .secondaryLabelColor
+        shortcutRow.addArrangedSubview(shortcutHead)
+
+        let sLabel = NSTextField(labelWithString: "(none)")
+        sLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        sLabel.translatesAutoresizingMaskIntoConstraints = false
+        sLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.shortcutLabel = sLabel
+        shortcutRow.addArrangedSubview(sLabel)
+
+        let recordButton = NSButton(
+            title: "Record",
+            target: self,
+            action: #selector(recordShortcutTapped)
+        )
+        self.shortcutRecordButton = recordButton
+        shortcutRow.addArrangedSubview(recordButton)
+        self.shortcutRow = shortcutRow
+        root.addArrangedSubview(shortcutRow)
 
         // Footer (Clear / Cancel / Save)
         let footer = NSStackView()
@@ -125,6 +195,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
 
         let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
         cancelButton.keyEquivalent = "\u{1b}"  // ESC
+        self.cancelButton = cancelButton
         footer.addArrangedSubview(cancelButton)
 
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveTapped))
@@ -153,18 +224,56 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         capturedPattern = pattern
         if let p = pattern {
             patternLabel?.stringValue = p.displayString
-            saveButton?.isEnabled = true
         } else {
             patternLabel?.stringValue = "(too short or ambiguous — try again)"
-            saveButton?.isEnabled = false
         }
+        updateSaveEnabled()
     }
 
     private func clearCapture() {
         capturedPattern = nil
         captureView?.clear()
         patternLabel?.stringValue = "(draw to capture)"
-        saveButton?.isEnabled = false
+        capturedShortcut = nil
+        shortcutLabel?.stringValue = "(none)"
+        stopRecordingShortcut(restoreUI: true)
+        updateSaveEnabled()
+    }
+
+    /// Save 활성 조건: 패턴 캡처 OK + 액션 종류별 추가 조건 충족.
+    private func updateSaveEnabled() {
+        guard capturedPattern != nil else {
+            saveButton?.isEnabled = false
+            return
+        }
+        switch currentActionKind() {
+        case .builtin:
+            saveButton?.isEnabled = true
+        case .shortcut:
+            saveButton?.isEnabled = (capturedShortcut != nil)
+        }
+    }
+
+    private func currentActionKind() -> ActionKind {
+        let raw = actionKindPopup?.selectedItem?.tag ?? ActionKind.builtin.rawValue
+        return ActionKind(rawValue: raw) ?? .builtin
+    }
+
+    private func applyActionKind(_ kind: ActionKind) {
+        switch kind {
+        case .builtin:
+            actionRow?.isHidden = false
+            shortcutRow?.isHidden = true
+            stopRecordingShortcut(restoreUI: true)
+        case .shortcut:
+            actionRow?.isHidden = true
+            shortcutRow?.isHidden = false
+        }
+        updateSaveEnabled()
+    }
+
+    @objc private func actionKindChanged(_ sender: NSPopUpButton) {
+        applyActionKind(currentActionKind())
     }
 
     @objc private func clearTapped() {
@@ -176,18 +285,77 @@ final class AddGestureController: NSObject, NSWindowDelegate {
     }
 
     @objc private func saveTapped() {
-        guard let pattern = capturedPattern,
-              let popup = actionPopup,
-              popup.indexOfSelectedItem >= 0,
-              popup.indexOfSelectedItem < actionChoices.count else { return }
-        let action = actionChoices[popup.indexOfSelectedItem]
+        guard let pattern = capturedPattern else { return }
+        let action: GestureAction
+        switch currentActionKind() {
+        case .builtin:
+            guard let popup = actionPopup,
+                  popup.indexOfSelectedItem >= 0,
+                  popup.indexOfSelectedItem < actionChoices.count else { return }
+            action = .builtin(actionChoices[popup.indexOfSelectedItem])
+        case .shortcut:
+            guard let shortcut = capturedShortcut else { return }
+            action = .shortcut(shortcut)
+        }
         let def = GestureDefinition(pattern: pattern, action: action)
         CustomGestureMappings.upsert(def)
         NotificationCenter.default.post(name: .customGesturesChanged, object: nil)
         window?.performClose(nil)
     }
 
+    // MARK: - Shortcut recording
+
+    @objc private func recordShortcutTapped() {
+        if keyMonitor != nil {
+            stopRecordingShortcut(restoreUI: true)
+        } else {
+            startRecordingShortcut()
+        }
+    }
+
+    private func startRecordingShortcut() {
+        shortcutRecordButton?.title = "Press a key…"
+        shortcutLabel?.stringValue = "…"
+        // 녹화 중에는 Save/Cancel의 keyEquivalent가 가로채지 않도록 잠시 비활성.
+        saveButton?.keyEquivalent = ""
+        cancelButton?.keyEquivalent = ""
+
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            // ESC 단독 — 녹화 취소
+            if event.keyCode == 0x35
+                && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                self.stopRecordingShortcut(restoreUI: true)
+                return nil
+            }
+            guard let shortcut = KeyShortcut.from(event: event) else {
+                // modifier-only 등 — 무시하고 계속 대기
+                return nil
+            }
+            self.capturedShortcut = shortcut
+            self.shortcutLabel?.stringValue = shortcut.displayString
+            self.stopRecordingShortcut(restoreUI: true)
+            self.updateSaveEnabled()
+            return nil
+        }
+    }
+
+    private func stopRecordingShortcut(restoreUI: Bool) {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+        guard restoreUI else { return }
+        shortcutRecordButton?.title = (capturedShortcut == nil) ? "Record" : "Re-record"
+        if capturedShortcut == nil {
+            shortcutLabel?.stringValue = "(none)"
+        }
+        saveButton?.keyEquivalent = "\r"
+        cancelButton?.keyEquivalent = "\u{1b}"
+    }
+
     func windowWillClose(_ notification: Notification) {
+        stopRecordingShortcut(restoreUI: false)
         clearCapture()
     }
 }

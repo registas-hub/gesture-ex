@@ -268,11 +268,11 @@ final class GestureTrailWindow {
         }
 
         // 매핑 조회 — custom 다중 segment 우선, 단일 방향은 기본 매핑
-        let matched: BrowserAction?
+        let matched: GestureAction?
         if let custom = CustomGestureMappings.match(pattern) {
             matched = custom
         } else if pattern.directions.count == 1 {
-            matched = GestureMappings.action(for: pattern.directions[0])
+            matched = .builtin(GestureMappings.action(for: pattern.directions[0]))
         } else {
             matched = nil
         }
@@ -280,7 +280,7 @@ final class GestureTrailWindow {
         guard let action = matched else {
             return "\(pattern.displayString)  (no mapping)"
         }
-        if action == .disabled {
+        if action.isDisabled {
             return "\(pattern.displayString)  (disabled)"
         }
         return "\(pattern.displayString)  \(action.label)"

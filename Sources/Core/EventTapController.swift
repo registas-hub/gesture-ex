@@ -17,7 +17,7 @@ final class EventTapController {
 
     /// 제스처 실행 직후 호출되는 콜백 (UI 스레드에서 호출됨).
     /// 단일 방향이면 `pattern.directions.count == 1`, 다중 segment는 그 이상.
-    var onGestureExecuted: ((GesturePattern, BrowserAction) -> Void)?
+    var onGestureExecuted: ((GesturePattern, GestureAction) -> Void)?
 
     /// 의도적 드래그(>= 10px)였으나 제스처가 실행되지 못했을 때 호출 (UI 스레드).
     /// 사용자에게 "왜 안 됐는지"를 즉시 알려주는 진단 채널.
@@ -225,11 +225,11 @@ final class EventTapController {
             }
 
             // ▶ 매칭: custom 다중 segment 우선 → 단일 방향은 GestureMappings
-            let matchedAction: BrowserAction?
+            let matchedAction: GestureAction?
             if let custom = CustomGestureMappings.match(recognizedPattern) {
                 matchedAction = custom
             } else if recognizedPattern.directions.count == 1 {
-                matchedAction = GestureMappings.action(for: recognizedPattern.directions[0])
+                matchedAction = .builtin(GestureMappings.action(for: recognizedPattern.directions[0]))
             } else {
                 matchedAction = nil  // 다중 segment지만 등록 없음
             }
@@ -245,7 +245,7 @@ final class EventTapController {
 
             // 매핑이 명시적으로 Disabled인 경우 → 사용자 의도가 "이 방향은 메뉴 띄움"
             // 이 케이스만 의도적으로 컨텍스트 메뉴를 띄운다.
-            if action == .disabled {
+            if action.isDisabled {
                 down.location = upLoc
                 down.post(tap: .cghidEventTap)
                 return Unmanaged.passUnretained(event)

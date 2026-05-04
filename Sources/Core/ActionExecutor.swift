@@ -1,11 +1,21 @@
 import CoreGraphics
 
 struct ActionExecutor {
-    /// 키보드 단축키를 합성해서 활성 앱에 전달한다.
-    /// HID tap 위치에 post → 모든 input 처리 레이어를 정상적으로 통과한다.
+    /// GestureAction을 활성 앱에 전달한다.
+    /// 빌트인 BrowserAction이면 미리 정의된 keyCode/flags를, 사용자 단축키면 녹화된 값을 발사한다.
     /// disabled 액션은 noop.
-    static func execute(_ action: BrowserAction) {
-        guard let keyCode = action.keyCode else { return }
+    static func execute(_ action: GestureAction) {
+        switch action {
+        case .builtin(let browserAction):
+            guard let keyCode = browserAction.keyCode else { return }
+            postKey(keyCode: keyCode, flags: browserAction.flags)
+        case .shortcut(let shortcut):
+            postKey(keyCode: CGKeyCode(shortcut.keyCode), flags: shortcut.cgFlags)
+        }
+    }
+
+    /// HID tap 위치에 post → 모든 input 처리 레이어를 정상적으로 통과한다.
+    private static func postKey(keyCode: CGKeyCode, flags: CGEventFlags) {
         let source = CGEventSource(stateID: .combinedSessionState)
         guard let down = CGEvent(keyboardEventSource: source,
                                   virtualKey: keyCode, keyDown: true),
@@ -13,8 +23,8 @@ struct ActionExecutor {
                                 virtualKey: keyCode, keyDown: false) else {
             return
         }
-        down.flags = action.flags
-        up.flags = action.flags
+        down.flags = flags
+        up.flags = flags
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }

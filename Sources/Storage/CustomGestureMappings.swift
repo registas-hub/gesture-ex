@@ -31,7 +31,7 @@ struct CustomGestureMappings {
         all = current
     }
 
-    static func match(_ pattern: GesturePattern) -> BrowserAction? {
+    static func match(_ pattern: GesturePattern) -> GestureAction? {
         return all.first(where: { $0.pattern == pattern })?.action
     }
 
