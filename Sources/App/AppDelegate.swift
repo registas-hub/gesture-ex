@@ -427,8 +427,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showAbout() {
         // macOS 표준 About 패널 — 다른 앱과 일관된 룩(아이콘·이름·버전·copyright)을
         // 자동으로 채우고, credits만 우리가 주입한다.
-        // toggle hotkey는 사용자가 Settings에서 바꿀 수 있으므로 정적 문자열이 아닌
-        // 현재 바인딩을 읽어 표시한다.
         let toggleKey = HotkeyPreferences.binding.displayString
         let baseAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11),
