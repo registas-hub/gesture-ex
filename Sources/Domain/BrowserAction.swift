@@ -82,6 +82,50 @@ enum BrowserAction: String, CaseIterable, Codable {
         case .resetZoom:    return "Reset Zoom"
         }
     }
+
+    /// 사용자에게 보여줄 단축키 문자열 (`⌘[`, `⇧⌘R`, `Home` 등).
+    /// `disabled`는 키 발사가 없으므로 nil.
+    var shortcutLabel: String? {
+        guard let code = keyCode else { return nil }
+        var modifiers = ""
+        if flags.contains(.maskControl)   { modifiers += "⌃" }
+        if flags.contains(.maskAlternate) { modifiers += "⌥" }
+        if flags.contains(.maskShift)     { modifiers += "⇧" }
+        if flags.contains(.maskCommand)   { modifiers += "⌘" }
+        return modifiers + Self.keyDisplayName(for: code)
+    }
+
+    /// popup·메뉴 표시용 라벨 — 인간 친화적 이름 + 단축키.
+    /// 단축키 없는 항목은 라벨만.
+    var menuTitle: String {
+        if let shortcut = shortcutLabel {
+            return "\(label)  \(shortcut)"
+        }
+        return label
+    }
+
+    /// CGKeyCode → 사용자에게 익숙한 키 표시 문자.
+    /// 매핑 테이블은 keyCode 정의와 1:1로 맞춰야 한다.
+    private static func keyDisplayName(for code: CGKeyCode) -> String {
+        switch code {
+        case 0x21: return "["
+        case 0x1E: return "]"
+        case 0x0F: return "R"
+        case 0x2F: return "."
+        case 0x11: return "T"
+        case 0x0D: return "W"
+        case 0x7C: return "→"
+        case 0x7B: return "←"
+        case 0x2D: return "N"
+        case 0x73: return "Home"
+        case 0x77: return "End"
+        case 0x03: return "F"
+        case 0x18: return "="
+        case 0x1B: return "−"
+        case 0x1D: return "0"
+        default:   return "?"
+        }
+    }
 }
 
 /// 의도적 드래그였으나 제스처 실행으로 이어지지 못한 사유.

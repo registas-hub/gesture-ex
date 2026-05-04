@@ -32,6 +32,14 @@ struct GestureAppFilter {
         }
     }
 
+    /// 사용자가 명시적으로 화이트리스트에 등록한 앱인지.
+    /// 옵션 A의 핵심: 이 앱은 브라우저 엔진 체크를 우회하고 제스처를 발사한다.
+    /// `whitelist` 모드 + 패턴 일치 조합에서만 true. 그 외 모드는 항상 false.
+    static func isExplicitlyAllowed(bundleID: String?) -> Bool {
+        guard mode == .whitelist else { return false }
+        return matches(bundleID)
+    }
+
     private static func matches(_ bundleID: String?) -> Bool {
         guard let id = bundleID, !id.isEmpty else { return false }
         for line in patternsText.split(whereSeparator: \.isNewline) {

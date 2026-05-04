@@ -179,24 +179,33 @@ final class EventTapController {
                 return Unmanaged.passUnretained(event)
             }
 
-            // 의도적 드래그였음 — 엔진별 토글 + 활성 앱이 지원 브라우저인지 확인
+            // 의도적 드래그였음 — Gesture Apps 필터 → 엔진 체크 순으로 평가한다.
+            //
+            // Gesture Apps 모드별 동작 (옵션 A):
+            //   • all:           shouldApply=true → 엔진 체크가 결정
+            //   • whitelist+IN:  shouldApply=true, isExplicitlyAllowed=true → 엔진 체크 우회·바로 발사
+            //   • whitelist+OUT: shouldApply=false → skip
+            //   • blacklist+IN:  shouldApply=false → skip
+            //   • blacklist+OUT: shouldApply=true → 엔진 체크가 결정 (기존 동작)
+            //
+            // 화이트리스트 등록 앱은 비-브라우저여도 엔진 체크를 건너뛰고 키스트로크 합성한다.
             let app = NSWorkspace.shared.frontmostApplication
-            guard gesturesEnabledForFrontmost else {
-                let cb = onGestureSkipped
-                DispatchQueue.main.async {
-                    cb?(.notChromium(bundleID: app?.bundleIdentifier, appName: app?.localizedName))
-                }
+            let bundleID = app?.bundleIdentifier
+            guard GestureAppFilter.shouldApply(to: bundleID) else {
                 down.location = upLoc
                 down.post(tap: .cghidEventTap)
                 return Unmanaged.passUnretained(event)
             }
-
-            // 사용자 정의 제스처 앱 스코프 — 허용되지 않은 앱이면 일반 컨텍스트 메뉴로 통과.
-            // (엔진 토글 + 이 필터는 AND. AppFilter 통과 ↔ 변환 자체 적용 여부와 별개의 게이트.)
-            guard GestureAppFilter.shouldApply(to: app?.bundleIdentifier) else {
-                down.location = upLoc
-                down.post(tap: .cghidEventTap)
-                return Unmanaged.passUnretained(event)
+            if !GestureAppFilter.isExplicitlyAllowed(bundleID: bundleID) {
+                guard gesturesEnabledForFrontmost else {
+                    let cb = onGestureSkipped
+                    DispatchQueue.main.async {
+                        cb?(.notChromium(bundleID: bundleID, appName: app?.localizedName))
+                    }
+                    down.location = upLoc
+                    down.post(tap: .cghidEventTap)
+                    return Unmanaged.passUnretained(event)
+                }
             }
 
             // ▶ 패턴 인식: 다중 segment 우선, 단일 방향은 fallback

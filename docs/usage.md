@@ -46,11 +46,19 @@ Open Settings via `⇧⌘,` or menu → **Open Config…** — a sidebar window 
 
 ### Gesture Mappings
 
-Pick an action for each cardinal direction (←/→/↑/↓).
+Pick an action for each cardinal direction (←/→/↑/↓). Each popup item shows the action name **and the keyboard shortcut that will be synthesized**, so you can predict the result in any app:
 
-13 actions are available out of the box:
-
-> Back / Forward / Reload / Hard Reload / New Tab / Close Tab / Reopen Closed Tab / Next Tab / Previous Tab / New Window / Scroll to Top / Scroll to Bottom / Disabled
+| Action | Shortcut | Action | Shortcut |
+|---|---|---|---|
+| Back | ⌘[ | New Window | ⌘N |
+| Forward | ⌘] | Scroll to Top | Home |
+| Reload | ⌘R | Scroll to Bottom | End |
+| Hard Reload | ⇧⌘R | Find in Page | ⌘F |
+| Stop Loading | ⌘. | Zoom In | ⌘= |
+| New Tab | ⌘T | Zoom Out | ⌘− |
+| Close Tab | ⌘W | Reset Zoom | ⌘0 |
+| Reopen Closed Tab | ⇧⌘T | Next Tab | ⌘⌥→ |
+| Disabled | (no key) | Previous Tab | ⌘⌥← |
 
 ### Live Overlay
 
@@ -72,15 +80,20 @@ Recognized by direction-change detection (segment ≥ 30 px, dominant axis ratio
 
 ### Apps for Mouse Gestures (Gesture Apps)
 
-Choose which apps fire mouse gestures. By default gestures run in every supported browser; use this to limit them further.
+Choose which apps fire mouse gestures. The mode dropdown decides how the engine check interacts with your list.
 
-- **Mode** — All apps (default) / Only listed / Exclude listed
+| Mode | Behavior |
+|---|---|
+| **All apps** (default) | Gestures run only in supported browsers (engine check active). Pattern list ignored. Same as the original behavior before Gesture Apps shipped. |
+| **Whitelist (Only listed)** | Gestures run **only** in the listed apps — engine check is **bypassed**. Non-browser apps you add will fire gestures too. |
+| **Blacklist (Exclude listed)** | Gestures run in every supported browser except the listed ones. Engine check still applies for non-listed apps. |
+
 - **Patterns** — same syntax as Mouse-up Apps (one bundle ID per line, `regex:` prefix, `#` comments)
 - **Choose App…** — pick a `.app` bundle from `/Applications` and the bundle ID is appended automatically
 
-Combined with the per-engine toggles (**Browser Gestures · Chromium / WebKit** in the menu bar), this filter is the AND-conjunction. A gesture only fires when *the engine is supported* AND *the app passes this filter*. Out-of-scope apps still receive the normal context menu on right-click + drag — gestures simply don't trigger.
+> Adding non-browser apps to the whitelist is supported, but be aware: gesture actions are keyboard shortcuts like `⌘[`, `⌘R`, `Home`/`End`. In non-browser apps these may do something different from "Back / Reload / Scroll-to-Top." `Scroll Top/Bottom`, `Close Tab`, and `New Tab` tend to behave consistently; `Back`/`Forward`/`Reload` are app-specific.
 
-This filter is independent of [Apps for Right-click on Mouse-up](#apps-for-right-click-on-mouse-up-mouse-up-apps): you can have the right-click conversion run everywhere while restricting gesture recognition to a few browsers.
+This filter is independent of [Apps for Right-click on Mouse-up](#apps-for-right-click-on-mouse-up-mouse-up-apps): you can have the right-click conversion run everywhere while restricting gesture recognition to a hand-picked set of apps (browser or otherwise).
 
 ### Apps for Right-click on Mouse-up (Mouse-up Apps)
 
