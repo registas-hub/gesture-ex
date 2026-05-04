@@ -99,6 +99,24 @@ enum BrowserAction: String, CaseIterable, Codable {
         return label
     }
 
+    /// 17개 액션 중 disabled를 제외한 16개를 4개 카테고리로 청킹해 popup의 결정 비용을 줄인다.
+    /// 분포: Navigation 5 (back/forward/reload/hardReload/stop) · Tabs 6 · Scroll 2 · Page 4.
+    /// `disabled`는 카테고리 밖에 단독으로 노출한다.
+    var category: BrowserActionCategory? {
+        switch self {
+        case .disabled:
+            return nil
+        case .back, .forward, .reload, .hardReload, .stop:
+            return .navigation
+        case .newTab, .closeTab, .reopenTab, .nextTab, .prevTab, .newWindow:
+            return .tabs
+        case .scrollTop, .scrollBottom:
+            return .scroll
+        case .findInPage, .zoomIn, .zoomOut, .resetZoom:
+            return .page
+        }
+    }
+
     /// CGKeyCode → 사용자에게 익숙한 키 표시 문자.
     /// 매핑 테이블은 keyCode 정의와 1:1로 맞춰야 한다.
     private static func keyDisplayName(for code: CGKeyCode) -> String {
@@ -120,6 +138,29 @@ enum BrowserAction: String, CaseIterable, Codable {
         case 0x1D: return "0"
         default:   return "?"
         }
+    }
+}
+
+/// `BrowserAction`을 popup에서 그룹화하기 위한 카테고리.
+/// 사용자에게 보이는 순서는 `allCases` 순서대로 — Navigation을 가장 위에 둔다.
+enum BrowserActionCategory: CaseIterable {
+    case navigation
+    case tabs
+    case scroll
+    case page
+
+    var label: String {
+        switch self {
+        case .navigation: return "Navigation"
+        case .tabs:       return "Tabs & Windows"
+        case .scroll:     return "Scroll"
+        case .page:       return "Page"
+        }
+    }
+
+    /// 이 카테고리에 속하는 액션을 enum 선언 순서대로 반환한다.
+    var actions: [BrowserAction] {
+        BrowserAction.allCases.filter { $0.category == self }
     }
 }
 

@@ -6,14 +6,16 @@ private enum SettingsSection: Int, CaseIterable {
     case mappings
     case overlay
     case gestureApps
+    case browsers
     case appFilter
 
     var label: String {
         switch self {
-        case .mappings:    return "Gesture Mappings"
-        case .overlay:     return "Live Overlay"
+        case .mappings:    return "Gestures"
+        case .overlay:     return "Overlay"
         case .gestureApps: return "Gesture Apps"
-        case .appFilter:   return "Mouse-up Apps"
+        case .browsers:    return "Browsers"
+        case .appFilter:   return "Right-click Apps"
         }
     }
 
@@ -23,6 +25,7 @@ private enum SettingsSection: Int, CaseIterable {
         case .mappings:    return "arrow.up.and.down.and.arrow.left.and.right"
         case .overlay:     return "paintbrush"
         case .gestureApps: return "app.badge.checkmark"
+        case .browsers:    return "safari"
         case .appFilter:   return "app.badge"
         }
     }
@@ -59,10 +62,14 @@ final class SettingsWindow: NSObject,
     // App Filter (Mouse-up Apps) 컨트롤
     private weak var appFilterModePopup: NSPopUpButton?
     private weak var appFilterTextView: NSTextView?
+    private weak var appFilterAdvancedStack: NSStackView?
+    private weak var appFilterDisclosure: NSButton?
 
     // Gesture App Filter (Gesture Apps) 컨트롤 — Mouse-up Apps와 동일 패턴, 다른 storage
     private weak var gestureFilterModePopup: NSPopUpButton?
     private weak var gestureFilterTextView: NSTextView?
+    private weak var gestureFilterAdvancedStack: NSStackView?
+    private weak var gestureFilterDisclosure: NSButton?
 
     /// Browser List 체크박스. Reset to Defaults 시 일괄 갱신용으로 보관.
     private var browserCheckboxes: [NSButton] = []
@@ -204,7 +211,8 @@ final class SettingsWindow: NSObject,
         return visualEffect
     }
 
-    /// 4개 페이지를 가진 tabless NSTabView.
+    /// `SettingsSection.allCases` 수만큼의 페이지를 가진 tabless NSTabView.
+    /// 사이드바 행과 1:1 매칭되며 사이드바 선택 변경 시 `selectTabViewItem(at:)`으로 동기화한다.
     private func buildPagesTabView() -> NSView {
         let tab = NSTabView()
         tab.tabViewType = .noTabsNoBorder
@@ -230,8 +238,12 @@ final class SettingsWindow: NSObject,
         let resetButton = NSButton(
             title: "Reset to Defaults",
             target: self,
-            action: #selector(resetToDefaults)
+            action: #selector(resetToDefaultsRequested)
         )
+        if #available(macOS 12.0, *) {
+            resetButton.hasDestructiveAction = true
+        }
+        resetButton.contentTintColor = .systemRed
         footer.addArrangedSubview(resetButton)
 
         let flexible = NSView()
@@ -260,6 +272,7 @@ final class SettingsWindow: NSObject,
         case .mappings:    body = buildMappingsBody()
         case .overlay:     body = buildOverlayBody()
         case .gestureApps: body = buildGestureAppsBody()
+        case .browsers:    body = buildBrowsersBody()
         case .appFilter:   body = buildAppFilterBody()
         }
 
@@ -288,6 +301,8 @@ final class SettingsWindow: NSObject,
     }
 
     /// 4-direction gesture mapping + custom gestures를 함께 보여주는 페이지.
+    /// 두 섹션을 각각 카드(NSBox)로 감싸 Common Region 신호를 강화한다 —
+    /// 사용자가 "이 그리드는 4-direction 매핑, 저 리스트는 custom 영역"으로 자동 분리 인식.
     private func buildMappingsBody() -> NSStackView {
         let stack = makePageStack(
             title: "Mouse Gesture Mappings",
@@ -319,16 +334,33 @@ final class SettingsWindow: NSObject,
             grid.column(at: 1).width = 80
         }
 
-        stack.addArrangedSubview(grid)
-
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        divider.widthAnchor.constraint(greaterThanOrEqualToConstant: 460).isActive = true
-        stack.addArrangedSubview(divider)
-
-        appendCustomGesturesSection(to: stack)
+        stack.addArrangedSubview(makeCard(title: "4-Direction Mappings", content: grid))
+        stack.addArrangedSubview(makeCard(title: "Custom Gestures", content: buildCustomGesturesContent()))
         return stack
+    }
+
+    /// 페이지 안의 sub-section을 둘러싸는 카드 컨테이너.
+    /// 시스템 기본 NSBox(.primary)는 미묘한 테두리·배경을 그려 Common Region 신호를 만든다.
+    /// 카드 간 spacing은 부모 stack의 spacing에 의존(기본 14) — 그룹 간 간격이 그룹 내 간격(spacing 8)보다 크다.
+    private func makeCard(title: String, content: NSView) -> NSView {
+        let box = NSBox()
+        box.boxType = .primary
+        box.title = title
+        box.titlePosition = .atTop
+        box.titleFont = .systemFont(ofSize: 13, weight: .semibold)
+        box.translatesAutoresizingMaskIntoConstraints = false
+
+        let body = NSStackView()
+        body.orientation = .vertical
+        body.alignment = .leading
+        body.spacing = 8
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 12, right: 12)
+        body.addArrangedSubview(content)
+
+        box.contentView = body
+        box.widthAnchor.constraint(greaterThanOrEqualToConstant: 480).isActive = true
+        return box
     }
 
     /// Live Overlay 페이지.
@@ -341,25 +373,28 @@ final class SettingsWindow: NSObject,
         return stack
     }
 
-    /// Mappings 페이지 하단에 붙는 Custom Gestures sub-section.
-    private func appendCustomGesturesSection(to stack: NSStackView) {
-        let title = NSTextField(labelWithString: "Custom Gestures")
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
-        stack.addArrangedSubview(title)
+    /// Custom Gestures 카드 안에 들어갈 수직 스택.
+    /// description → Add 버튼 → 리스트 순서. 카드 frame은 makeCard가 그린다.
+    private func buildCustomGesturesContent() -> NSView {
+        let inner = NSStackView()
+        inner.orientation = .vertical
+        inner.alignment = .leading
+        inner.spacing = 8
+        inner.translatesAutoresizingMaskIntoConstraints = false
 
         let desc = NSTextField(wrappingLabelWithString:
             "Multi-segment patterns drawn by you (e.g. ←↑, ↓→).")
         desc.font = .systemFont(ofSize: 11)
         desc.textColor = .secondaryLabelColor
         desc.preferredMaxLayoutWidth = 460
-        stack.addArrangedSubview(desc)
+        inner.addArrangedSubview(desc)
 
         let addButton = NSButton(
             title: "+ Add Custom Gesture…",
             target: self,
             action: #selector(showAddGesture)
         )
-        stack.addArrangedSubview(addButton)
+        inner.addArrangedSubview(addButton)
 
         let listStack = NSStackView()
         listStack.orientation = .vertical
@@ -367,7 +402,7 @@ final class SettingsWindow: NSObject,
         listStack.alignment = .leading
         listStack.translatesAutoresizingMaskIntoConstraints = false
         self.customListStack = listStack
-        stack.addArrangedSubview(listStack)
+        inner.addArrangedSubview(listStack)
 
         refreshCustomList()
 
@@ -384,6 +419,8 @@ final class SettingsWindow: NSObject,
             name: .customGesturesChanged,
             object: nil
         )
+
+        return inner
     }
 
     /// Right-click on mouse-up 변환의 적용 대상 앱 설정 페이지.
@@ -395,13 +432,16 @@ final class SettingsWindow: NSObject,
             initialMode: AppFilter.mode,
             initialPatterns: AppFilter.patternsText,
             storeModePopup: { [weak self] in self?.appFilterModePopup = $0 },
-            storeTextView: { [weak self] in self?.appFilterTextView = $0 }
+            storeTextView: { [weak self] in self?.appFilterTextView = $0 },
+            storeAdvancedStack: { [weak self] in self?.appFilterAdvancedStack = $0 },
+            storeDisclosure: { [weak self] in self?.appFilterDisclosure = $0 }
         )
     }
 
     /// 마우스 제스처 인식의 적용 대상 앱 설정 페이지.
+    /// (Browsers 섹션은 별도 사이드바 항목으로 분리되었다 — `buildBrowsersBody` 참고)
     private func buildGestureAppsBody() -> NSStackView {
-        let stack = buildBundleIDFilterPage(
+        return buildBundleIDFilterPage(
             title: "Apps for Mouse Gestures",
             description: """
             Choose which apps fire mouse gestures.
@@ -414,36 +454,27 @@ final class SettingsWindow: NSObject,
             initialMode: GestureAppFilter.mode,
             initialPatterns: GestureAppFilter.patternsText,
             storeModePopup: { [weak self] in self?.gestureFilterModePopup = $0 },
-            storeTextView: { [weak self] in self?.gestureFilterTextView = $0 }
+            storeTextView: { [weak self] in self?.gestureFilterTextView = $0 },
+            storeAdvancedStack: { [weak self] in self?.gestureFilterAdvancedStack = $0 },
+            storeDisclosure: { [weak self] in self?.gestureFilterDisclosure = $0 }
         )
-        appendBrowserListSection(to: stack)
-        return stack
     }
 
-    /// "Supported Browsers" 하위 섹션 — Gesture Apps 페이지 하단에 붙는다.
-    /// 사용자가 카탈로그 브라우저를 개별 enable/disable 할 수 있다.
-    private func appendBrowserListSection(to stack: NSStackView) {
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        divider.widthAnchor.constraint(greaterThanOrEqualToConstant: 460).isActive = true
-        stack.addArrangedSubview(divider)
-
-        let title = NSTextField(labelWithString: "Supported Browsers")
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
-        stack.addArrangedSubview(title)
-
-        let desc = NSTextField(wrappingLabelWithString:
-            "Uncheck a browser to exclude it from auto-detection. " +
-            "Disabled browsers behave like any other non-browser app — gestures only fire if you add them to the Whitelist.")
-        desc.font = .systemFont(ofSize: 11)
-        desc.textColor = .secondaryLabelColor
-        desc.preferredMaxLayoutWidth = 460
-        stack.addArrangedSubview(desc)
+    /// "Supported Browsers" 페이지 — 카탈로그 브라우저 enable/disable.
+    /// 이전엔 Gesture Apps 하단에 끼어있어 정보 밀도가 과다했으나
+    /// 별도 사이드바 항목으로 분리해 한 화면 = 한 주제 원칙에 정렬한다.
+    private func buildBrowsersBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Supported Browsers",
+            description:
+                "Uncheck a browser to exclude it from auto-detection. " +
+                "Disabled browsers behave like any other non-browser app — gestures only fire if you add them to the Whitelist on the Gesture Apps page."
+        )
 
         browserCheckboxes.removeAll()
         appendBrowserGroup(.chromium, header: "Chromium engine", to: stack)
         appendBrowserGroup(.webkit,   header: "WebKit engine",   to: stack)
+        return stack
     }
 
     private func appendBrowserGroup(_ engine: BrowserEngine, header: String, to stack: NSStackView) {
@@ -487,6 +518,11 @@ final class SettingsWindow: NSObject,
 
     /// Mouse-up Apps와 Gesture Apps가 공유하는 bundle ID pattern filter 페이지 빌더.
     /// storage는 sender.tag(BundleFilterTarget)로 dispatch한다.
+    ///
+    /// 레이아웃 우선순위:
+    ///   1) Mode 드롭다운 — 어떤 정책을 쓸지가 가장 큰 결정
+    ///   2) "Add an app…" prominent 버튼 — GUI 경로(80% 사용자)
+    ///   3) Disclosure 토글로 숨겨진 patterns textarea — 코드형 입력은 power-user 영역
     private func buildBundleIDFilterPage(
         title: String,
         description: String,
@@ -494,7 +530,9 @@ final class SettingsWindow: NSObject,
         initialMode: AppFilterMode,
         initialPatterns: String,
         storeModePopup: (NSPopUpButton) -> Void,
-        storeTextView: (NSTextView) -> Void
+        storeTextView: (NSTextView) -> Void,
+        storeAdvancedStack: (NSStackView) -> Void,
+        storeDisclosure: (NSButton) -> Void
     ) -> NSStackView {
         let stack = makePageStack(title: title, description: description)
 
@@ -524,27 +562,54 @@ final class SettingsWindow: NSObject,
         modeRow.addArrangedSubview(modePopup)
         stack.addArrangedSubview(modeRow)
 
-        let patternsRow = NSStackView()
-        patternsRow.orientation = .horizontal
-        patternsRow.alignment = .centerY
-        patternsRow.spacing = 8
+        // Prominent "Add an app…" 행 — 일반 사용자가 쓰는 주 경로.
+        let chooseRow = NSStackView()
+        chooseRow.orientation = .horizontal
+        chooseRow.alignment = .centerY
+        chooseRow.spacing = 12
 
-        let patternsLabel = NSTextField(labelWithString:
-            "Patterns (one per line; prefix with 'regex:' for regular expression):")
-        patternsLabel.font = .systemFont(ofSize: 11)
-        patternsLabel.textColor = .secondaryLabelColor
-        patternsRow.addArrangedSubview(patternsLabel)
+        let chooseLabel = NSTextField(labelWithString: "Add an app:")
+        chooseLabel.font = .systemFont(ofSize: 13)
+        chooseRow.addArrangedSubview(chooseLabel)
 
         let chooseAppButton = NSButton(
             title: "Choose App…",
             target: self,
             action: #selector(bundleFilterChooseApp(_:))
         )
-        chooseAppButton.bezelStyle = .roundRect
-        chooseAppButton.controlSize = .small
+        chooseAppButton.bezelStyle = .rounded
         chooseAppButton.tag = target.rawValue
-        patternsRow.addArrangedSubview(chooseAppButton)
-        stack.addArrangedSubview(patternsRow)
+        chooseRow.addArrangedSubview(chooseAppButton)
+        stack.addArrangedSubview(chooseRow)
+
+        // 점진적 노출용 disclosure — bundle ID/regex 직접 편집은 advanced 영역에 숨긴다.
+        let disclosure = NSButton(
+            title: "▶ Show advanced patterns",
+            target: self,
+            action: #selector(toggleBundleFilterAdvanced(_:))
+        )
+        disclosure.bezelStyle = .recessed
+        disclosure.setButtonType(.onOff)
+        disclosure.controlSize = .small
+        disclosure.tag = target.rawValue
+        disclosure.state = .off
+        storeDisclosure(disclosure)
+        stack.addArrangedSubview(disclosure)
+
+        // Advanced 영역 — 기본 접힘. 펼치면 patterns 라벨 + textarea + 예시 도움말 노출.
+        let advancedStack = NSStackView()
+        advancedStack.orientation = .vertical
+        advancedStack.alignment = .leading
+        advancedStack.spacing = 8
+        advancedStack.translatesAutoresizingMaskIntoConstraints = false
+        advancedStack.isHidden = true
+        storeAdvancedStack(advancedStack)
+
+        let patternsLabel = NSTextField(labelWithString:
+            "Patterns (one per line; prefix with 'regex:' for regular expression):")
+        patternsLabel.font = .systemFont(ofSize: 11)
+        patternsLabel.textColor = .secondaryLabelColor
+        advancedStack.addArrangedSubview(patternsLabel)
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -575,7 +640,7 @@ final class SettingsWindow: NSObject,
         textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
         storeTextView(textView)
-        stack.addArrangedSubview(scrollView)
+        advancedStack.addArrangedSubview(scrollView)
 
         let helpLabel = NSTextField(labelWithString: """
         Examples:
@@ -586,9 +651,28 @@ final class SettingsWindow: NSObject,
         """)
         helpLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         helpLabel.textColor = .tertiaryLabelColor
-        stack.addArrangedSubview(helpLabel)
+        advancedStack.addArrangedSubview(helpLabel)
+
+        stack.addArrangedSubview(advancedStack)
 
         return stack
+    }
+
+    /// disclosure 버튼 토글 핸들러 — sender.tag로 어느 페이지를 토글할지 결정.
+    /// 펼쳐졌을 때 textarea가 뷰 위계에 보이도록 isHidden을 동기화한다.
+    @objc private func toggleBundleFilterAdvanced(_ sender: NSButton) {
+        let isOn = (sender.state == .on)
+        let arrow = isOn ? "▼" : "▶"
+        let verb = isOn ? "Hide" : "Show"
+        sender.title = "\(arrow) \(verb) advanced patterns"
+        switch BundleFilterTarget(rawValue: sender.tag) {
+        case .appFilter:
+            appFilterAdvancedStack?.isHidden = !isOn
+        case .gestureFilter:
+            gestureFilterAdvancedStack?.isHidden = !isOn
+        case .none:
+            break
+        }
     }
 
     // MARK: - Common UI helpers
@@ -609,32 +693,14 @@ final class SettingsWindow: NSObject,
 
     private func makePopup(for direction: GestureDirection) -> NSPopUpButton {
         let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
-        for action in BrowserAction.allCases {
-            let item = NSMenuItem(title: action.menuTitle, action: nil, keyEquivalent: "")
-            item.representedObject = action
-            popup.menu?.addItem(item)
-            // separator 흉내: disabled 항목 다음에 구분선 한 줄
-            if action == .disabled {
-                popup.menu?.addItem(NSMenuItem.separator())
-            }
-        }
-        Self.selectAction(GestureMappings.action(for: direction), in: popup)
+        BrowserActionPopup.populate(popup, includeDisabled: true)
+        BrowserActionPopup.select(GestureMappings.action(for: direction), in: popup)
         popup.target = self
         popup.action = #selector(popupChanged(_:))
         popup.tag = direction.rawValue
         popup.translatesAutoresizingMaskIntoConstraints = false
         popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
         return popup
-    }
-
-    /// representedObject 기반으로 BrowserAction에 해당하는 메뉴 항목을 선택한다.
-    /// menuTitle이 라벨+단축키 조합이라 title 매칭이 더 이상 안전하지 않으므로 representedObject를 사용.
-    private static func selectAction(_ action: BrowserAction, in popup: NSPopUpButton) {
-        if let idx = popup.menu?.items.firstIndex(where: {
-            ($0.representedObject as? BrowserAction) == action
-        }) {
-            popup.selectItem(at: idx)
-        }
     }
 
     @objc private func popupChanged(_ sender: NSPopUpButton) {
@@ -832,6 +898,12 @@ final class SettingsWindow: NSObject,
             removeButton.bezelStyle = .roundRect
             removeButton.controlSize = .small
             removeButton.tag = idx
+            // destructive 시각 신호 — Edit과 동일 형태였던 위치를 차별화해
+            // 미스 클릭으로 제스처가 사라지는 사고를 줄인다.
+            if #available(macOS 12.0, *) {
+                removeButton.hasDestructiveAction = true
+            }
+            removeButton.contentTintColor = .systemRed
             row.addArrangedSubview(removeButton)
 
             stack.addArrangedSubview(row)
@@ -859,7 +931,33 @@ final class SettingsWindow: NSObject,
 
     // MARK: - Reset
 
-    @objc private func resetToDefaults() {
+    /// 사용자 클릭 진입점 — destructive action 보호용 확인 다이얼로그.
+    /// 모든 페이지의 설정(매핑·오버레이·커스텀·필터·브라우저)을 한 번에 초기화하므로
+    /// 실수 클릭 방지를 위해 명시적 확인을 받는다.
+    @objc private func resetToDefaultsRequested() {
+        let alert = NSAlert()
+        alert.messageText = "Reset all settings to defaults?"
+        alert.informativeText = """
+        This will erase your custom gestures, gesture mappings, overlay colors, app filters, and browser toggles. This cannot be undone.
+        """
+        alert.alertStyle = .warning
+        let resetBtn = alert.addButton(withTitle: "Reset")
+        if #available(macOS 11.0, *) {
+            resetBtn.hasDestructiveAction = true
+        }
+        alert.addButton(withTitle: "Cancel")
+        if let window = window {
+            alert.beginSheetModal(for: window) { [weak self] response in
+                if response == .alertFirstButtonReturn {
+                    self?.performResetToDefaults()
+                }
+            }
+        } else if alert.runModal() == .alertFirstButtonReturn {
+            performResetToDefaults()
+        }
+    }
+
+    private func performResetToDefaults() {
         GestureMappings.resetToDefaults()
         OverlayPreferences.resetToDefaults()
         CustomGestureMappings.resetAll()
@@ -868,7 +966,7 @@ final class SettingsWindow: NSObject,
         BrowserPreferences.resetToDefaults()
         // 매핑 popup 갱신
         for (direction, popup) in popups {
-            Self.selectAction(GestureMappings.action(for: direction), in: popup)
+            BrowserActionPopup.select(GestureMappings.action(for: direction), in: popup)
         }
         // 오버레이 컨트롤 갱신
         trailColorWell?.color = OverlayPreferences.trailColor
@@ -895,6 +993,14 @@ final class SettingsWindow: NSObject,
         for cb in browserCheckboxes {
             cb.state = .on
         }
+        // Advanced patterns 영역도 접힌 기본 상태로 복원 — disclosure 라벨/상태와
+        // 영역 표시 여부의 일관성을 유지한다.
+        for disclosure in [appFilterDisclosure, gestureFilterDisclosure] {
+            disclosure?.state = .off
+            disclosure?.title = "▶ Show advanced patterns"
+        }
+        appFilterAdvancedStack?.isHidden = true
+        gestureFilterAdvancedStack?.isHidden = true
         refreshCustomList()
     }
 
