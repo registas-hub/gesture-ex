@@ -28,6 +28,13 @@ swiftc "${SOURCES[@]}" \
 echo "📝 Installing Info.plist…"
 cp "$DIR/Info.plist" "$APP/Contents/Info.plist"
 
+if [ -f "$DIR/Resources/AppIcon.icns" ]; then
+    echo "🎨 Installing AppIcon.icns…"
+    cp "$DIR/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+else
+    echo "⚠️  Resources/AppIcon.icns not found — run scripts/generate-icon.sh to create it."
+fi
+
 # 코드 서명 — 자체 서명 인증서가 있으면 사용 (TCC 권한 영속화), 없으면 ad-hoc 폴백
 # 사용자가 환경변수로 명시 가능: SIGNING_IDENTITY="My Cert" ./build.sh
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-RightClickOnUpDev}"
