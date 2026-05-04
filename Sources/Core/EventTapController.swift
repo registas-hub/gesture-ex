@@ -180,12 +180,20 @@ final class EventTapController {
             }
 
             // 의도적 드래그였음 — 엔진별 토글 + 활성 앱이 지원 브라우저인지 확인
+            let app = NSWorkspace.shared.frontmostApplication
             guard gesturesEnabledForFrontmost else {
-                let app = NSWorkspace.shared.frontmostApplication
                 let cb = onGestureSkipped
                 DispatchQueue.main.async {
                     cb?(.notChromium(bundleID: app?.bundleIdentifier, appName: app?.localizedName))
                 }
+                down.location = upLoc
+                down.post(tap: .cghidEventTap)
+                return Unmanaged.passUnretained(event)
+            }
+
+            // 사용자 정의 제스처 앱 스코프 — 허용되지 않은 앱이면 일반 컨텍스트 메뉴로 통과.
+            // (엔진 토글 + 이 필터는 AND. AppFilter 통과 ↔ 변환 자체 적용 여부와 별개의 게이트.)
+            guard GestureAppFilter.shouldApply(to: app?.bundleIdentifier) else {
                 down.location = upLoc
                 down.post(tap: .cghidEventTap)
                 return Unmanaged.passUnretained(event)

@@ -70,7 +70,19 @@ Pick an action for each cardinal direction (←/→/↑/↓).
 
 Recognized by direction-change detection (segment ≥ 30 px, dominant axis ratio ≥ 1.5).
 
-### Apps for Right-click on Mouse-up
+### Apps for Mouse Gestures (Gesture Apps)
+
+Choose which apps fire mouse gestures. By default gestures run in every supported browser; use this to limit them further.
+
+- **Mode** — All apps (default) / Only listed / Exclude listed
+- **Patterns** — same syntax as Mouse-up Apps (one bundle ID per line, `regex:` prefix, `#` comments)
+- **Choose App…** — pick a `.app` bundle from `/Applications` and the bundle ID is appended automatically
+
+Combined with the per-engine toggles (**Browser Gestures · Chromium / WebKit** in the menu bar), this filter is the AND-conjunction. A gesture only fires when *the engine is supported* AND *the app passes this filter*. Out-of-scope apps still receive the normal context menu on right-click + drag — gestures simply don't trigger.
+
+This filter is independent of [Apps for Right-click on Mouse-up](#apps-for-right-click-on-mouse-up-mouse-up-apps): you can have the right-click conversion run everywhere while restricting gesture recognition to a few browsers.
+
+### Apps for Right-click on Mouse-up (Mouse-up Apps)
 
 Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app.
 

@@ -5,24 +5,34 @@ import AppKit
 private enum SettingsSection: Int, CaseIterable {
     case mappings
     case overlay
+    case gestureApps
     case appFilter
 
     var label: String {
         switch self {
-        case .mappings:  return "Gesture Mappings"
-        case .overlay:   return "Live Overlay"
-        case .appFilter: return "Mouse-up Apps"
+        case .mappings:    return "Gesture Mappings"
+        case .overlay:     return "Live Overlay"
+        case .gestureApps: return "Gesture Apps"
+        case .appFilter:   return "Mouse-up Apps"
         }
     }
 
     /// macOS SF Symbol 이름 (사이드바 아이콘용).
     var symbolName: String {
         switch self {
-        case .mappings:  return "arrow.up.and.down.and.arrow.left.and.right"
-        case .overlay:   return "paintbrush"
-        case .appFilter: return "app.badge"
+        case .mappings:    return "arrow.up.and.down.and.arrow.left.and.right"
+        case .overlay:     return "paintbrush"
+        case .gestureApps: return "app.badge.checkmark"
+        case .appFilter:   return "app.badge"
         }
     }
+}
+
+/// 공유 bundle-ID pattern 필터 페이지가 어느 storage를 다루는지 식별.
+/// chooseApp 버튼·mode popup의 sender.tag로 dispatch한다.
+private enum BundleFilterTarget: Int {
+    case appFilter = 0       // Mouse-up Apps
+    case gestureFilter = 1   // Gesture Apps
 }
 
 final class SettingsWindow: NSObject,
@@ -46,9 +56,13 @@ final class SettingsWindow: NSObject,
     /// Custom gesture 리스트 컨테이너 — 추가/삭제 시 동적으로 갱신.
     private weak var customListStack: NSStackView?
 
-    // App Filter 컨트롤
+    // App Filter (Mouse-up Apps) 컨트롤
     private weak var appFilterModePopup: NSPopUpButton?
     private weak var appFilterTextView: NSTextView?
+
+    // Gesture App Filter (Gesture Apps) 컨트롤 — Mouse-up Apps와 동일 패턴, 다른 storage
+    private weak var gestureFilterModePopup: NSPopUpButton?
+    private weak var gestureFilterTextView: NSTextView?
 
     // 사이드바/페이지 컨테이너
     private weak var sidebarTable: NSTableView?
@@ -240,9 +254,10 @@ final class SettingsWindow: NSObject,
     private func buildPage(for section: SettingsSection) -> NSView {
         let body: NSStackView
         switch section {
-        case .mappings:  body = buildMappingsBody()
-        case .overlay:   body = buildOverlayBody()
-        case .appFilter: body = buildAppFilterBody()
+        case .mappings:    body = buildMappingsBody()
+        case .overlay:     body = buildOverlayBody()
+        case .gestureApps: body = buildGestureAppsBody()
+        case .appFilter:   body = buildAppFilterBody()
         }
 
         let container = NSView()
@@ -370,10 +385,42 @@ final class SettingsWindow: NSObject,
 
     /// Right-click on mouse-up 변환의 적용 대상 앱 설정 페이지.
     private func buildAppFilterBody() -> NSStackView {
-        let stack = makePageStack(
+        return buildBundleIDFilterPage(
             title: "Apps for Right-click on Mouse-up",
-            description: "Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app."
+            description: "Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app.",
+            target: .appFilter,
+            initialMode: AppFilter.mode,
+            initialPatterns: AppFilter.patternsText,
+            storeModePopup: { [weak self] in self?.appFilterModePopup = $0 },
+            storeTextView: { [weak self] in self?.appFilterTextView = $0 }
         )
+    }
+
+    /// 마우스 제스처 인식의 적용 대상 앱 설정 페이지.
+    private func buildGestureAppsBody() -> NSStackView {
+        return buildBundleIDFilterPage(
+            title: "Apps for Mouse Gestures",
+            description: "Choose which apps fire mouse gestures. By default gestures run in every supported browser; use this to limit them further (combined with the per-engine toggles in the menu bar).",
+            target: .gestureFilter,
+            initialMode: GestureAppFilter.mode,
+            initialPatterns: GestureAppFilter.patternsText,
+            storeModePopup: { [weak self] in self?.gestureFilterModePopup = $0 },
+            storeTextView: { [weak self] in self?.gestureFilterTextView = $0 }
+        )
+    }
+
+    /// Mouse-up Apps와 Gesture Apps가 공유하는 bundle ID pattern filter 페이지 빌더.
+    /// storage는 sender.tag(BundleFilterTarget)로 dispatch한다.
+    private func buildBundleIDFilterPage(
+        title: String,
+        description: String,
+        target: BundleFilterTarget,
+        initialMode: AppFilterMode,
+        initialPatterns: String,
+        storeModePopup: (NSPopUpButton) -> Void,
+        storeTextView: (NSTextView) -> Void
+    ) -> NSStackView {
+        let stack = makePageStack(title: title, description: description)
 
         // Mode 드롭다운
         let modeRow = NSStackView()
@@ -389,14 +436,15 @@ final class SettingsWindow: NSObject,
         for m in AppFilterMode.allCases {
             modePopup.addItem(withTitle: m.label)
         }
-        if let idx = AppFilterMode.allCases.firstIndex(of: AppFilter.mode) {
+        if let idx = AppFilterMode.allCases.firstIndex(of: initialMode) {
             modePopup.selectItem(at: idx)
         }
         modePopup.target = self
-        modePopup.action = #selector(appFilterModeChanged(_:))
+        modePopup.action = #selector(bundleFilterModeChanged(_:))
+        modePopup.tag = target.rawValue
         modePopup.translatesAutoresizingMaskIntoConstraints = false
         modePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
-        self.appFilterModePopup = modePopup
+        storeModePopup(modePopup)
         modeRow.addArrangedSubview(modePopup)
         stack.addArrangedSubview(modeRow)
 
@@ -414,10 +462,11 @@ final class SettingsWindow: NSObject,
         let chooseAppButton = NSButton(
             title: "Choose App…",
             target: self,
-            action: #selector(chooseAppForFilter)
+            action: #selector(bundleFilterChooseApp(_:))
         )
         chooseAppButton.bezelStyle = .roundRect
         chooseAppButton.controlSize = .small
+        chooseAppButton.tag = target.rawValue
         patternsRow.addArrangedSubview(chooseAppButton)
         stack.addArrangedSubview(patternsRow)
 
@@ -430,7 +479,7 @@ final class SettingsWindow: NSObject,
         scrollView.autohidesScrollers = true
 
         let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 140))
-        textView.string = AppFilter.patternsText
+        textView.string = initialPatterns
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -449,7 +498,7 @@ final class SettingsWindow: NSObject,
         )
         textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
-        self.appFilterTextView = textView
+        storeTextView(textView)
         stack.addArrangedSubview(scrollView)
 
         let helpLabel = NSTextField(labelWithString: """
@@ -712,6 +761,7 @@ final class SettingsWindow: NSObject,
         OverlayPreferences.resetToDefaults()
         CustomGestureMappings.resetAll()
         AppFilter.resetToDefaults()
+        GestureAppFilter.resetToDefaults()
         // 매핑 popup 갱신
         for (direction, popup) in popups {
             let current = GestureMappings.action(for: direction)
@@ -729,24 +779,34 @@ final class SettingsWindow: NSObject,
         }) {
             lingerPopup?.selectItem(at: idx)
         }
-        // App Filter 컨트롤 갱신
+        // Bundle ID filter 컨트롤 갱신 (Mouse-up Apps · Gesture Apps 둘 다)
         if let idx = AppFilterMode.allCases.firstIndex(of: AppFilter.mode) {
             appFilterModePopup?.selectItem(at: idx)
         }
         appFilterTextView?.string = AppFilter.patternsText
+        if let idx = AppFilterMode.allCases.firstIndex(of: GestureAppFilter.mode) {
+            gestureFilterModePopup?.selectItem(at: idx)
+        }
+        gestureFilterTextView?.string = GestureAppFilter.patternsText
         refreshCustomList()
     }
 
-    // MARK: - App Filter handlers
+    // MARK: - Bundle ID filter handlers (Mouse-up Apps · Gesture Apps)
 
-    @objc private func appFilterModeChanged(_ sender: NSPopUpButton) {
+    @objc private func bundleFilterModeChanged(_ sender: NSPopUpButton) {
         let idx = sender.indexOfSelectedItem
         guard idx >= 0, idx < AppFilterMode.allCases.count else { return }
-        AppFilter.mode = AppFilterMode.allCases[idx]
+        let mode = AppFilterMode.allCases[idx]
+        switch BundleFilterTarget(rawValue: sender.tag) {
+        case .appFilter:     AppFilter.mode = mode
+        case .gestureFilter: GestureAppFilter.mode = mode
+        case .none:          break
+        }
     }
 
     /// NSOpenPanel로 .app 번들을 선택받아 bundle ID를 패턴 목록에 추가한다.
-    @objc private func chooseAppForFilter() {
+    /// sender.tag로 어느 필터(Mouse-up Apps / Gesture Apps)에 추가할지 결정한다.
+    @objc private func bundleFilterChooseApp(_ sender: NSButton) {
         let panel = NSOpenPanel()
         panel.title = "Choose Application"
         panel.prompt = "Add"
@@ -767,27 +827,42 @@ final class SettingsWindow: NSObject,
             alert.runModal()
             return
         }
-        appendFilterPattern(bundleID)
+        guard let target = BundleFilterTarget(rawValue: sender.tag) else { return }
+        appendFilterPattern(bundleID, to: target)
     }
 
     /// 패턴 텍스트 끝에 한 줄 추가. 동일 패턴이 이미 있으면 추가하지 않는다.
-    private func appendFilterPattern(_ pattern: String) {
-        var text = AppFilter.patternsText
+    private func appendFilterPattern(_ pattern: String, to target: BundleFilterTarget) {
+        let currentText: String
+        switch target {
+        case .appFilter:     currentText = AppFilter.patternsText
+        case .gestureFilter: currentText = GestureAppFilter.patternsText
+        }
+        var text = currentText
         let alreadyExists = text
             .split(whereSeparator: \.isNewline)
             .contains { $0.trimmingCharacters(in: .whitespaces) == pattern }
         if alreadyExists { return }
         if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
         text += pattern + "\n"
-        AppFilter.patternsText = text
-        appFilterTextView?.string = text
+        switch target {
+        case .appFilter:
+            AppFilter.patternsText = text
+            appFilterTextView?.string = text
+        case .gestureFilter:
+            GestureAppFilter.patternsText = text
+            gestureFilterTextView?.string = text
+        }
     }
 
     /// NSTextViewDelegate — 패턴 텍스트가 변경될 때마다 즉시 영속화.
     func textDidChange(_ notification: Notification) {
-        guard let tv = notification.object as? NSTextView,
-              tv === appFilterTextView else { return }
-        AppFilter.patternsText = tv.string
+        guard let tv = notification.object as? NSTextView else { return }
+        if tv === appFilterTextView {
+            AppFilter.patternsText = tv.string
+        } else if tv === gestureFilterTextView {
+            GestureAppFilter.patternsText = tv.string
+        }
     }
 
     @objc private func closeWindow() {
