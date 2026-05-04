@@ -24,14 +24,13 @@ enum BrowserActionPopup {
             menu.addItem(disabledItem)
         }
 
-        // 첫 카테고리 앞 separator는 disabled 항목과 구분할 때만 필요
-        var firstCategory = true
-
-        for category in BrowserActionCategory.allCases {
-            if includeDisabled || !firstCategory {
+        // separator 규칙 — disabled 항목 다음, 그리고 카테고리 사이에만 추가한다.
+        // includeDisabled=true면 첫 카테고리도 separator 뒤에 시작하고,
+        // false면 첫 카테고리는 separator 없이 곧바로 시작한다 (idx > 0 조건이 처리).
+        for (idx, category) in BrowserActionCategory.allCases.enumerated() {
+            if includeDisabled || idx > 0 {
                 menu.addItem(NSMenuItem.separator())
             }
-            firstCategory = false
 
             let header = NSMenuItem(title: category.label, action: nil, keyEquivalent: "")
             header.isEnabled = false
