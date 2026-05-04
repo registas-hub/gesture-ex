@@ -1,5 +1,4 @@
 # Tag push (vX.Y.Z) 시 자동으로 build → zip → SHA256 → GitHub Release 생성.
-# 로컬 create-release.sh의 [1/5]~[4/5] 단계를 대체한다.
 #
 # workflow_dispatch로도 수동 실행 가능 (secret/workflow 자체를 빠르게 검증할 때).
 # dry-run=true면 build/zip/sha만 수행하고 release 생성/asset 업로드는 건너뛴다.
