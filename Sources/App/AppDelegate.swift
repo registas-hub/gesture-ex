@@ -206,7 +206,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 시각적으로(회색) 종속 관계를 드러낸다.
         chromiumGesturesItem.isEnabled = enabled
         webkitGesturesItem.isEnabled = enabled
-        gesturesSectionHeader.isEnabled = false
         customizeItem.isEnabled = true
 
         // 섹션 헤더 — mouse-up OFF 또는 권한 부족 상태를 명시해 inert 상태를 인지시킨다.
