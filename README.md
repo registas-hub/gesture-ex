@@ -138,8 +138,8 @@ Pick an action for each cardinal direction (←/→/↑/↓).
 4. Pick an action
 5. **Save** — pattern is persisted in `UserDefaults` and recognized next time
 
-### App Filter
-Restrict the right-click-on-mouse-up conversion to specific apps.
+### Apps for Right-click on Mouse-up
+Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app.
 - **Mode** — All apps (default) / Only listed / Exclude listed
 - **Patterns** — one bundle ID per line (`com.google.Chrome`); prefix with `regex:` for regex (`regex:^com\.google\..*`); `#` lines are comments
 

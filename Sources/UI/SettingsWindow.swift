@@ -11,7 +11,7 @@ private enum SettingsSection: Int, CaseIterable {
         switch self {
         case .mappings:  return "Gesture Mappings"
         case .overlay:   return "Live Overlay"
-        case .appFilter: return "App Filter"
+        case .appFilter: return "Mouse-up Apps"
         }
     }
 
@@ -368,11 +368,11 @@ final class SettingsWindow: NSObject,
         )
     }
 
-    /// Application filter 페이지.
+    /// Right-click on mouse-up 변환의 적용 대상 앱 설정 페이지.
     private func buildAppFilterBody() -> NSStackView {
         let stack = makePageStack(
-            title: "Application Filter",
-            description: "Limit which apps the right-click on mouse-up conversion applies to."
+            title: "Apps for Right-click on Mouse-up",
+            description: "Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app."
         )
 
         // Mode 드롭다운
