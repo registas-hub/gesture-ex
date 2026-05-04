@@ -19,6 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 같은 alert을 다시 띄우는 race를 막는다.
     private var didShowLaunchPermissionAlert = false
 
+    /// "Don't show this again at launch" 체크 상태를 저장하는 UserDefaults 키.
+    /// 사용자가 의도적으로 권한을 거부하는 시나리오(예: hotkey/UI만 쓰고 싶은 경우)에
+    /// 매 launch 시 modal이 뜨는 dark-pattern을 막는다. 명시적 토글 시도 경로의 알림은
+    /// 이 플래그와 무관하게 항상 표시된다.
+    private static let suppressLaunchPermissionAlertKey = "permissionAlert.suppressedAtLaunch"
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
@@ -58,11 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 첫 실행 시 권한이 하나라도 없으면 자동으로 안내한다.
         // 사용자가 메뉴를 열어 "ON (no permission)"을 발견하기 전에 능동적으로 알림.
         // applyState가 메뉴를 갱신한 직후에 띄워야 메뉴 상태가 일관된다.
-        if !PermissionChecker.allGranted {
+        // 사용자가 "Don't show again" 체크한 적이 있으면 launch path 자동 알림은 건너뛴다 —
+        // 명시적으로 toggleEnabled을 시도할 때는 그대로 알림이 뜬다.
+        if !PermissionChecker.allGranted && !UserDefaults.standard.bool(forKey: Self.suppressLaunchPermissionAlertKey) {
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.didShowLaunchPermissionAlert else { return }
                 self.didShowLaunchPermissionAlert = true
-                self.showPermissionAlert()
+                self.showPermissionAlert(allowSuppression: true)
             }
         }
     }
@@ -213,9 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateMenuStateUI() {
         let enabled = EventTapController.shared.isEnabled
         let running = EventTapController.shared.isRunning
-        let axOK = PermissionChecker.accessibilityGranted
-        let imOK = PermissionChecker.inputMonitoringGranted
-        let permissionsOK = axOK && imOK
+        let axStatus = PermissionChecker.accessibility
+        let imStatus = PermissionChecker.inputMonitoring
+        let permissionsOK = axStatus.isGranted && imStatus.isGranted
 
         toggleItem.state = enabled ? .on : .off
         chromiumGesturesItem.state = EventTapController.shared.chromiumGesturesEnabled ? .on : .off
@@ -239,15 +247,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             gesturesSectionHeader.title = "Browser Gestures"
         }
 
-        // Status 라벨 — 권한 미부여 시 두 권한을 ✓/✗로 분리 표시해
-        // 사용자가 어느 단계가 남았는지 즉시 파악하도록 한다.
+        // Status 라벨 — 권한 미부여 시 두 권한을 ✓/✗/? glyph로 분리 표시해
+        // 사용자가 어느 단계가 남았는지 즉시 파악하도록 한다 (?는 not determined).
         let statusText: String
         if !enabled {
             statusText = "Status: OFF"
         } else if !permissionsOK {
-            let ax = axOK ? "✓" : "✗"
-            let im = imOK ? "✓" : "✗"
-            statusText = "Permissions: Accessibility \(ax) · Input Monitoring \(im)"
+            statusText = "Permissions: Accessibility \(axStatus.glyph) · Input Monitoring \(imStatus.glyph)"
         } else if running {
             statusText = "Status: ON ✓"
         } else {
@@ -299,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if EventTapController.shared.isEnabled {
             let ok = EventTapController.shared.start()
             if !ok && showAlertOnFailure {
-                showPermissionAlert()
+                showPermissionAlert(allowSuppression: false)
             }
         } else {
             EventTapController.shared.stop()
@@ -341,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if didAutoEnable {
                 ctrl.isEnabled = false
             }
-            showPermissionAlert()
+            showPermissionAlert(allowSuppression: false)
         }
     }
 
@@ -394,37 +400,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ])
     }
 
-    private func showPermissionAlert() {
-        let axOK = PermissionChecker.accessibilityGranted
-        let imOK = PermissionChecker.inputMonitoringGranted
-        let ax = axOK ? "✓" : "✗"
-        let im = imOK ? "✓" : "✗"
+    /// - Parameter allowSuppression: launch path 자동 알림에서만 true. 사용자가
+    ///   "Don't show again" 체크박스를 활성화하면 다음 launch부터 자동 알림을 건너뛴다.
+    ///   사용자가 토글을 명시적으로 시도해 권한 부재로 실패한 경로에서는 false로 호출 —
+    ///   suppression 체크와 상관없이 사용자에게 결과를 알려야 한다.
+    private func showPermissionAlert(allowSuppression: Bool) {
+        let axStatus = PermissionChecker.accessibility
+        let imStatus = PermissionChecker.inputMonitoring
 
         // 두 권한이 모두 부여된 경우엔 알릴 게 없다 (이중 호출 방지).
-        if axOK && imOK { return }
+        if axStatus.isGranted && imStatus.isGranted { return }
 
-        let granted = (axOK ? 1 : 0) + (imOK ? 1 : 0)
+        let granted = (axStatus.isGranted ? 1 : 0) + (imStatus.isGranted ? 1 : 0)
 
         let alert = NSAlert()
         alert.messageText = "Permissions required (\(granted)/2 granted)"
         alert.informativeText = """
         gesture-ex needs both permissions to convert right-clicks and read mouse drags.
 
-          \(ax)  Accessibility
-          \(im)  Input Monitoring
+          \(axStatus.glyph)  Accessibility
+          \(imStatus.glyph)  Input Monitoring
 
         Open Privacy & Security to grant the missing one.
         """
         alert.alertStyle = .warning
-        alert.addButton(withTitle: axOK ? "Open Input Monitoring" : "Open Accessibility")
+        if allowSuppression {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Don't show this again at launch"
+        }
+        let missingPane: PrivacyPane = !axStatus.isGranted ? .accessibility : .inputMonitoring
+        alert.addButton(withTitle: missingPane.openButtonTitle)
         alert.addButton(withTitle: "Later")
-        if alert.runModal() == .alertFirstButtonReturn {
-            // 부족한 첫 번째 권한 페인으로 직접 이동한다.
-            if !axOK {
-                openPrivacyPane(.accessibility)
-            } else {
-                openPrivacyPane(.inputMonitoring)
-            }
+        let response = alert.runModal()
+        if allowSuppression, alert.suppressionButton?.state == .on {
+            UserDefaults.standard.set(true, forKey: Self.suppressLaunchPermissionAlertKey)
+        }
+        if response == .alertFirstButtonReturn {
+            openPrivacyPane(missingPane)
         }
     }
 
@@ -438,6 +450,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             case .inputMonitoring:
                 return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            }
+        }
+
+        /// 알림의 첫 번째 버튼 라벨 — 부족한 페인으로 직접 이동한다는 의도를 담는다.
+        var openButtonTitle: String {
+            switch self {
+            case .accessibility:   return "Open Accessibility"
+            case .inputMonitoring: return "Open Input Monitoring"
             }
         }
     }

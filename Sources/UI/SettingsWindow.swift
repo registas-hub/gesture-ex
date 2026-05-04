@@ -59,17 +59,18 @@ final class SettingsWindow: NSObject,
     /// Custom gesture 리스트 컨테이너 — 추가/삭제 시 동적으로 갱신.
     private weak var customListStack: NSStackView?
 
-    // App Filter (Mouse-up Apps) 컨트롤
-    private weak var appFilterModePopup: NSPopUpButton?
-    private weak var appFilterTextView: NSTextView?
-    private weak var appFilterAdvancedStack: NSStackView?
-    private weak var appFilterDisclosure: NSButton?
+    /// 두 bundle filter 페이지(Right-click Apps / Gesture Apps)가 보여주는 컨트롤들의 weak 참조 묶음.
+    /// ivars 4개를 페이지마다 따로 두면 Reset / 변경 알림 처리에서 호출부가 N배로 늘어나므로
+    /// 한 struct로 묶어 BundleFilterTarget 별로 1쌍씩 보관한다.
+    private struct BundleFilterControls {
+        weak var modePopup: NSPopUpButton?
+        weak var textView: NSTextView?
+        weak var advancedStack: NSStackView?
+        weak var disclosure: NSButton?
+    }
 
-    // Gesture App Filter (Gesture Apps) 컨트롤 — Mouse-up Apps와 동일 패턴, 다른 storage
-    private weak var gestureFilterModePopup: NSPopUpButton?
-    private weak var gestureFilterTextView: NSTextView?
-    private weak var gestureFilterAdvancedStack: NSStackView?
-    private weak var gestureFilterDisclosure: NSButton?
+    private var appFilterControls = BundleFilterControls()
+    private var gestureFilterControls = BundleFilterControls()
 
     /// Browser List 체크박스. Reset to Defaults 시 일괄 갱신용으로 보관.
     private var browserCheckboxes: [NSButton] = []
@@ -425,23 +426,21 @@ final class SettingsWindow: NSObject,
 
     /// Right-click on mouse-up 변환의 적용 대상 앱 설정 페이지.
     private func buildAppFilterBody() -> NSStackView {
-        return buildBundleIDFilterPage(
+        let result = buildBundleIDFilterPage(
             title: "Apps for Right-click on Mouse-up",
             description: "Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app.",
             target: .appFilter,
             initialMode: AppFilter.mode,
-            initialPatterns: AppFilter.patternsText,
-            storeModePopup: { [weak self] in self?.appFilterModePopup = $0 },
-            storeTextView: { [weak self] in self?.appFilterTextView = $0 },
-            storeAdvancedStack: { [weak self] in self?.appFilterAdvancedStack = $0 },
-            storeDisclosure: { [weak self] in self?.appFilterDisclosure = $0 }
+            initialPatterns: AppFilter.patternsText
         )
+        appFilterControls = result.controls
+        return result.view
     }
 
     /// 마우스 제스처 인식의 적용 대상 앱 설정 페이지.
     /// (Browsers 섹션은 별도 사이드바 항목으로 분리되었다 — `buildBrowsersBody` 참고)
     private func buildGestureAppsBody() -> NSStackView {
-        return buildBundleIDFilterPage(
+        let result = buildBundleIDFilterPage(
             title: "Apps for Mouse Gestures",
             description: """
             Choose which apps fire mouse gestures.
@@ -452,17 +451,16 @@ final class SettingsWindow: NSObject,
             """,
             target: .gestureFilter,
             initialMode: GestureAppFilter.mode,
-            initialPatterns: GestureAppFilter.patternsText,
-            storeModePopup: { [weak self] in self?.gestureFilterModePopup = $0 },
-            storeTextView: { [weak self] in self?.gestureFilterTextView = $0 },
-            storeAdvancedStack: { [weak self] in self?.gestureFilterAdvancedStack = $0 },
-            storeDisclosure: { [weak self] in self?.gestureFilterDisclosure = $0 }
+            initialPatterns: GestureAppFilter.patternsText
         )
+        gestureFilterControls = result.controls
+        return result.view
     }
 
     /// "Supported Browsers" 페이지 — 카탈로그 브라우저 enable/disable.
     /// 이전엔 Gesture Apps 하단에 끼어있어 정보 밀도가 과다했으나
     /// 별도 사이드바 항목으로 분리해 한 화면 = 한 주제 원칙에 정렬한다.
+    /// 두 엔진(Chromium / WebKit)을 각각 카드로 묶어 Common Region 신호를 강화한다.
     private func buildBrowsersBody() -> NSStackView {
         let stack = makePageStack(
             title: "Supported Browsers",
@@ -472,17 +470,14 @@ final class SettingsWindow: NSObject,
         )
 
         browserCheckboxes.removeAll()
-        appendBrowserGroup(.chromium, header: "Chromium engine", to: stack)
-        appendBrowserGroup(.webkit,   header: "WebKit engine",   to: stack)
+        stack.addArrangedSubview(makeCard(title: "Chromium engine", content: makeBrowserGrid(.chromium)))
+        stack.addArrangedSubview(makeCard(title: "WebKit engine",   content: makeBrowserGrid(.webkit)))
         return stack
     }
 
-    private func appendBrowserGroup(_ engine: BrowserEngine, header: String, to stack: NSStackView) {
-        let head = NSTextField(labelWithString: header)
-        head.font = .systemFont(ofSize: 12, weight: .semibold)
-        head.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(head)
-
+    /// 한 엔진의 브라우저 체크박스를 2열 그리드로 배치.
+    /// 카드 안에 들어갈 콘텐츠로 설계되어 헤더 라벨은 카드 제목이 담당한다.
+    private func makeBrowserGrid(_ engine: BrowserEngine) -> NSGridView {
         let entries = BrowserDetector.catalog.filter { $0.engine == engine }
         let grid = NSGridView()
         grid.rowSpacing = 4
@@ -495,7 +490,7 @@ final class SettingsWindow: NSObject,
                 : NSView()
             grid.addRow(with: [left, right])
         }
-        stack.addArrangedSubview(grid)
+        return grid
     }
 
     private func makeBrowserCheckbox(_ entry: BrowserCatalogEntry) -> NSButton {
@@ -516,7 +511,12 @@ final class SettingsWindow: NSObject,
         BrowserPreferences.setEnabled(sender.state == .on, for: bundleID)
     }
 
-    /// Mouse-up Apps와 Gesture Apps가 공유하는 bundle ID pattern filter 페이지 빌더.
+    private struct BundleFilterPageResult {
+        let view: NSStackView
+        let controls: BundleFilterControls
+    }
+
+    /// Right-click Apps와 Gesture Apps가 공유하는 bundle ID pattern filter 페이지 빌더.
     /// storage는 sender.tag(BundleFilterTarget)로 dispatch한다.
     ///
     /// 레이아웃 우선순위:
@@ -528,12 +528,8 @@ final class SettingsWindow: NSObject,
         description: String,
         target: BundleFilterTarget,
         initialMode: AppFilterMode,
-        initialPatterns: String,
-        storeModePopup: (NSPopUpButton) -> Void,
-        storeTextView: (NSTextView) -> Void,
-        storeAdvancedStack: (NSStackView) -> Void,
-        storeDisclosure: (NSButton) -> Void
-    ) -> NSStackView {
+        initialPatterns: String
+    ) -> BundleFilterPageResult {
         let stack = makePageStack(title: title, description: description)
 
         // Mode 드롭다운
@@ -558,7 +554,6 @@ final class SettingsWindow: NSObject,
         modePopup.tag = target.rawValue
         modePopup.translatesAutoresizingMaskIntoConstraints = false
         modePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
-        storeModePopup(modePopup)
         modeRow.addArrangedSubview(modePopup)
         stack.addArrangedSubview(modeRow)
 
@@ -583,8 +578,10 @@ final class SettingsWindow: NSObject,
         stack.addArrangedSubview(chooseRow)
 
         // 점진적 노출용 disclosure — bundle ID/regex 직접 편집은 advanced 영역에 숨긴다.
+        // chevron SF Symbol을 image/alternateImage로 두면 onOff 토글 시 시스템이 자동으로
+        // ▶ ↔ ▼ 표시를 바꿔주므로 핸들러는 isHidden 동기화만 책임지면 된다.
         let disclosure = NSButton(
-            title: "▶ Show advanced patterns",
+            title: "Advanced patterns",
             target: self,
             action: #selector(toggleBundleFilterAdvanced(_:))
         )
@@ -593,7 +590,16 @@ final class SettingsWindow: NSObject,
         disclosure.controlSize = .small
         disclosure.tag = target.rawValue
         disclosure.state = .off
-        storeDisclosure(disclosure)
+        disclosure.imagePosition = .imageLeading
+        let chevronConfig = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+        disclosure.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: "show"
+        )?.withSymbolConfiguration(chevronConfig)
+        disclosure.alternateImage = NSImage(
+            systemSymbolName: "chevron.down",
+            accessibilityDescription: "hide"
+        )?.withSymbolConfiguration(chevronConfig)
         stack.addArrangedSubview(disclosure)
 
         // Advanced 영역 — 기본 접힘. 펼치면 patterns 라벨 + textarea + 예시 도움말 노출.
@@ -603,7 +609,6 @@ final class SettingsWindow: NSObject,
         advancedStack.spacing = 8
         advancedStack.translatesAutoresizingMaskIntoConstraints = false
         advancedStack.isHidden = true
-        storeAdvancedStack(advancedStack)
 
         let patternsLabel = NSTextField(labelWithString:
             "Patterns (one per line; prefix with 'regex:' for regular expression):")
@@ -639,7 +644,6 @@ final class SettingsWindow: NSObject,
         )
         textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
-        storeTextView(textView)
         advancedStack.addArrangedSubview(scrollView)
 
         let helpLabel = NSTextField(labelWithString: """
@@ -655,21 +659,25 @@ final class SettingsWindow: NSObject,
 
         stack.addArrangedSubview(advancedStack)
 
-        return stack
+        let controls = BundleFilterControls(
+            modePopup: modePopup,
+            textView: textView,
+            advancedStack: advancedStack,
+            disclosure: disclosure
+        )
+        return BundleFilterPageResult(view: stack, controls: controls)
     }
 
     /// disclosure 버튼 토글 핸들러 — sender.tag로 어느 페이지를 토글할지 결정.
-    /// 펼쳐졌을 때 textarea가 뷰 위계에 보이도록 isHidden을 동기화한다.
+    /// chevron 이미지는 NSButton이 alternateImage로 자동 토글하므로 본 핸들러는
+    /// advanced 영역의 isHidden 동기화만 담당한다.
     @objc private func toggleBundleFilterAdvanced(_ sender: NSButton) {
         let isOn = (sender.state == .on)
-        let arrow = isOn ? "▼" : "▶"
-        let verb = isOn ? "Hide" : "Show"
-        sender.title = "\(arrow) \(verb) advanced patterns"
         switch BundleFilterTarget(rawValue: sender.tag) {
         case .appFilter:
-            appFilterAdvancedStack?.isHidden = !isOn
+            appFilterControls.advancedStack?.isHidden = !isOn
         case .gestureFilter:
-            gestureFilterAdvancedStack?.isHidden = !isOn
+            gestureFilterControls.advancedStack?.isHidden = !isOn
         case .none:
             break
         }
@@ -980,27 +988,26 @@ final class SettingsWindow: NSObject,
         }) {
             lingerPopup?.selectItem(at: idx)
         }
-        // Bundle ID filter 컨트롤 갱신 (Mouse-up Apps · Gesture Apps 둘 다)
+        // Bundle ID filter 컨트롤 갱신 (Right-click Apps · Gesture Apps 둘 다)
         if let idx = AppFilterMode.allCases.firstIndex(of: AppFilter.mode) {
-            appFilterModePopup?.selectItem(at: idx)
+            appFilterControls.modePopup?.selectItem(at: idx)
         }
-        appFilterTextView?.string = AppFilter.patternsText
+        appFilterControls.textView?.string = AppFilter.patternsText
         if let idx = AppFilterMode.allCases.firstIndex(of: GestureAppFilter.mode) {
-            gestureFilterModePopup?.selectItem(at: idx)
+            gestureFilterControls.modePopup?.selectItem(at: idx)
         }
-        gestureFilterTextView?.string = GestureAppFilter.patternsText
+        gestureFilterControls.textView?.string = GestureAppFilter.patternsText
         // Browser List 체크박스를 모두 ON으로 (disabled 셋이 비었으므로)
         for cb in browserCheckboxes {
             cb.state = .on
         }
-        // Advanced patterns 영역도 접힌 기본 상태로 복원 — disclosure 라벨/상태와
-        // 영역 표시 여부의 일관성을 유지한다.
-        for disclosure in [appFilterDisclosure, gestureFilterDisclosure] {
-            disclosure?.state = .off
-            disclosure?.title = "▶ Show advanced patterns"
+        // Advanced patterns 영역도 접힌 기본 상태로 복원 —
+        // disclosure 상태와 영역 표시 여부의 일관성을 유지한다.
+        // chevron 이미지는 alternateImage가 시스템적으로 토글하므로 별도 라벨 갱신 불필요.
+        for controls in [appFilterControls, gestureFilterControls] {
+            controls.disclosure?.state = .off
+            controls.advancedStack?.isHidden = true
         }
-        appFilterAdvancedStack?.isHidden = true
-        gestureFilterAdvancedStack?.isHidden = true
         refreshCustomList()
     }
 
@@ -1061,19 +1068,19 @@ final class SettingsWindow: NSObject,
         switch target {
         case .appFilter:
             AppFilter.patternsText = text
-            appFilterTextView?.string = text
+            appFilterControls.textView?.string = text
         case .gestureFilter:
             GestureAppFilter.patternsText = text
-            gestureFilterTextView?.string = text
+            gestureFilterControls.textView?.string = text
         }
     }
 
     /// NSTextViewDelegate — 패턴 텍스트가 변경될 때마다 즉시 영속화.
     func textDidChange(_ notification: Notification) {
         guard let tv = notification.object as? NSTextView else { return }
-        if tv === appFilterTextView {
+        if tv === appFilterControls.textView {
             AppFilter.patternsText = tv.string
-        } else if tv === gestureFilterTextView {
+        } else if tv === gestureFilterControls.textView {
             GestureAppFilter.patternsText = tv.string
         }
     }
