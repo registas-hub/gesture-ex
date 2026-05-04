@@ -1,16 +1,15 @@
 import AppKit
 
-/// 설정 import/export 결과를 사용자에게 알리거나 try 컨텍스트에서 던지기 위한 에러 타입.
 enum ConfigIOError: LocalizedError {
-    case invalidJSON
+    case invalidJSON(underlying: Error)
     case unsupportedSchema(Int)
     case readFailed(underlying: Error)
     case writeFailed(underlying: Error)
 
     var errorDescription: String? {
         switch self {
-        case .invalidJSON:
-            return "The selected file is not a valid configuration JSON."
+        case .invalidJSON(let e):
+            return "The selected file is not a valid configuration JSON: \(e.localizedDescription)"
         case .unsupportedSchema(let v):
             return "This configuration was created with a newer version of the app (schema \(v))."
         case .readFailed(let e):
@@ -21,14 +20,9 @@ enum ConfigIOError: LocalizedError {
     }
 }
 
-/// 설정 전체를 한 JSON 문서로 묶기 위한 스냅샷.
-///
-/// 모든 필드는 optional로 두어 import 시 부분 적용을 허용한다 — 누락된 섹션은 기존 값을 유지한다.
-/// 각 storage struct가 자체 keying 스킴(GestureMappings는 방향별 키, OverlayPreferences는 NSKeyedArchiver 등)을
-/// 가지고 있어, 이를 그대로 직렬화하면 외부 공유에 적합하지 않다. 그래서 휴대용(JSON friendly) 표현을
-/// 별도로 가진 스냅샷 레이어를 둔다.
+/// Optional 필드는 import 시 부분 적용 — 누락된 섹션은 기존 값을 유지한다.
 struct ConfigSnapshot: Codable {
-    /// 향후 마이그레이션용 — major bump 시 import 거부, minor는 수용.
+    /// major bump 시 import 거부, minor는 수용.
     static let currentSchema = 1
 
     var schema: Int = currentSchema
@@ -44,10 +38,10 @@ struct ConfigSnapshot: Codable {
     var hotkey: HotkeyPayload?
 
     struct GestureMappingsPayload: Codable {
-        var left: String?
-        var right: String?
-        var up: String?
-        var down: String?
+        var left: BrowserAction?
+        var right: BrowserAction?
+        var up: BrowserAction?
+        var down: BrowserAction?
     }
 
     struct OverlayPayload: Codable {
@@ -63,7 +57,7 @@ struct ConfigSnapshot: Codable {
     }
 
     struct BundleFilterPayload: Codable {
-        var mode: String
+        var mode: AppFilterMode
         var patternsText: String
     }
 
@@ -72,7 +66,7 @@ struct ConfigSnapshot: Codable {
         var isEnabled: Bool?
     }
 
-    /// sRGB 컴포넌트 표현. NSColor의 NSKeyedArchiver 포맷은 휴대성이 없어 JSON 친화 표현으로 변환한다.
+    /// NSColor의 NSKeyedArchiver 포맷은 휴대성이 없어 sRGB 컴포넌트로 변환한다.
     struct ColorRGBA: Codable {
         var r: Double
         var g: Double
@@ -93,19 +87,17 @@ struct ConfigSnapshot: Codable {
     }
 }
 
-/// 현재 UserDefaults 상태 ↔ ConfigSnapshot ↔ JSON 파일 사이의 직렬화/역직렬화.
 struct ConfigIO {
-    /// 현재 UserDefaults 상태로부터 스냅샷 생성. 한 트랜잭션의 일관성은 UserDefaults가 즉시 반환해 주므로 별도 락 없음.
     static func captureSnapshot() -> ConfigSnapshot {
         var snap = ConfigSnapshot()
         snap.exportedAt = Date()
         snap.appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
         snap.gestureMappings = ConfigSnapshot.GestureMappingsPayload(
-            left:  GestureMappings.action(for: .left).rawValue,
-            right: GestureMappings.action(for: .right).rawValue,
-            up:    GestureMappings.action(for: .up).rawValue,
-            down:  GestureMappings.action(for: .down).rawValue
+            left:  GestureMappings.action(for: .left),
+            right: GestureMappings.action(for: .right),
+            up:    GestureMappings.action(for: .up),
+            down:  GestureMappings.action(for: .down)
         )
 
         snap.customGestures = CustomGestureMappings.all
@@ -123,11 +115,11 @@ struct ConfigIO {
         )
 
         snap.appFilter = ConfigSnapshot.BundleFilterPayload(
-            mode: AppFilter.mode.rawValue,
+            mode: AppFilter.mode,
             patternsText: AppFilter.patternsText
         )
         snap.gestureAppFilter = ConfigSnapshot.BundleFilterPayload(
-            mode: GestureAppFilter.mode.rawValue,
+            mode: GestureAppFilter.mode,
             patternsText: GestureAppFilter.patternsText
         )
 
@@ -139,7 +131,6 @@ struct ConfigIO {
         return snap
     }
 
-    /// 스냅샷을 사용자 친화 형태(들여쓰기, 안정 키 순서)의 JSON 데이터로 인코딩.
     static func encode(_ snap: ConfigSnapshot) throws -> Data {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -147,7 +138,6 @@ struct ConfigIO {
         return try enc.encode(snap)
     }
 
-    /// 파일에서 스냅샷을 역직렬화. 데이터 손상이나 신규 스키마는 ConfigIOError로 매핑.
     static func decode(_ data: Data) throws -> ConfigSnapshot {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
@@ -155,7 +145,7 @@ struct ConfigIO {
         do {
             snap = try dec.decode(ConfigSnapshot.self, from: data)
         } catch {
-            throw ConfigIOError.invalidJSON
+            throw ConfigIOError.invalidJSON(underlying: error)
         }
         if snap.schema > ConfigSnapshot.currentSchema {
             throw ConfigIOError.unsupportedSchema(snap.schema)
@@ -163,7 +153,6 @@ struct ConfigIO {
         return snap
     }
 
-    /// URL → ConfigSnapshot. 실패 사유에 따라 read/decode 에러를 분기.
     static func load(from url: URL) throws -> ConfigSnapshot {
         let data: Data
         do {
@@ -174,7 +163,6 @@ struct ConfigIO {
         return try decode(data)
     }
 
-    /// 현재 상태를 URL에 기록. 디렉토리 미존재 등은 writeFailed로 매핑.
     static func save(to url: URL, snapshot: ConfigSnapshot? = nil) throws {
         let snap = snapshot ?? captureSnapshot()
         let data: Data
@@ -190,14 +178,13 @@ struct ConfigIO {
         }
     }
 
-    /// 스냅샷을 UserDefaults에 적용한다. 누락된 섹션은 무시 — 기존 값 보존.
-    /// 모든 변경 후 적절한 NotificationCenter 알림을 발사해 EventTap/SettingsWindow가 즉시 동기화하게 한다.
+    /// 누락된 섹션은 기존 값 보존. 호출자(`SettingsWindow`)가 적용 후 UI를 일괄 refresh 한다.
     static func apply(_ snap: ConfigSnapshot) {
         if let m = snap.gestureMappings {
-            applyGestureMapping(m.left,  for: .left)
-            applyGestureMapping(m.right, for: .right)
-            applyGestureMapping(m.up,    for: .up)
-            applyGestureMapping(m.down,  for: .down)
+            if let a = m.left  { GestureMappings.setAction(a, for: .left) }
+            if let a = m.right { GestureMappings.setAction(a, for: .right) }
+            if let a = m.up    { GestureMappings.setAction(a, for: .up) }
+            if let a = m.down  { GestureMappings.setAction(a, for: .down) }
         }
 
         if let customs = snap.customGestures {
@@ -217,24 +204,18 @@ struct ConfigIO {
         }
 
         if let f = snap.appFilter {
-            if let mode = AppFilterMode(rawValue: f.mode) { AppFilter.mode = mode }
+            AppFilter.mode = f.mode
             AppFilter.patternsText = f.patternsText
         }
         if let f = snap.gestureAppFilter {
-            if let mode = AppFilterMode(rawValue: f.mode) { GestureAppFilter.mode = mode }
+            GestureAppFilter.mode = f.mode
             GestureAppFilter.patternsText = f.patternsText
         }
 
         if let h = snap.hotkey {
-            // isEnabled 먼저 적용해 binding 변경 알림이 한 번에 정합 상태로 발사되게 한다 —
-            // setter가 동일값이면 일찍 반환하므로 중복 알림 비용은 크지 않다.
+            // isEnabled를 먼저 적용 — binding 변경 알림 시점에 enabled 상태가 일관되어야 한다.
             if let v = h.isEnabled { HotkeyPreferences.isEnabled = v }
             if let b = h.binding   { HotkeyPreferences.binding = b }
         }
-    }
-
-    private static func applyGestureMapping(_ raw: String?, for direction: GestureDirection) {
-        guard let raw, let action = BrowserAction(rawValue: raw) else { return }
-        GestureMappings.setAction(action, for: direction)
     }
 }

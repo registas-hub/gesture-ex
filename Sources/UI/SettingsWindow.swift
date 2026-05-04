@@ -1195,19 +1195,18 @@ final class SettingsWindow: NSObject,
         GestureAppFilter.resetToDefaults()
         BrowserPreferences.resetToDefaults()
         HotkeyPreferences.resetToDefaults()
-        refreshAllControlsFromStorage(collapseAdvanced: true)
+        refreshAllControlsFromStorage()
+        // Reset은 advanced 패널을 기본(접힘) 상태로 되돌린다. Import는 사용자가 펴둔 상태를 보존한다.
+        for controls in [appFilterControls, gestureFilterControls] {
+            controls.disclosure?.state = .off
+            controls.advancedStack?.isHidden = true
+        }
     }
 
-    /// 모든 페이지 컨트롤을 현재 UserDefaults 값으로 다시 그린다.
-    /// Reset(전 설정 일괄 변경) / Import(외부 스냅샷 적용) 양쪽에서 공통으로 사용한다.
-    /// `collapseAdvanced`는 두 bundle filter 페이지의 접기 패널을 기본 상태(접힘)로 되돌릴지 — Reset 기본 동작이며,
-    /// Import는 사용자가 펴 둔 상태를 굳이 건드리지 않는다.
-    private func refreshAllControlsFromStorage(collapseAdvanced: Bool) {
-        // 매핑 popup 갱신
+    private func refreshAllControlsFromStorage() {
         for (direction, popup) in popups {
             BrowserActionPopup.select(GestureMappings.action(for: direction), in: popup)
         }
-        // 오버레이 컨트롤 갱신
         trailColorWell?.color = OverlayPreferences.trailColor
         backgroundColorWell?.color = OverlayPreferences.backgroundColor
         let opacity = OverlayPreferences.backgroundOpacity
@@ -1219,7 +1218,6 @@ final class SettingsWindow: NSObject,
         }) {
             lingerPopup?.selectItem(at: idx)
         }
-        // Bundle ID filter 컨트롤 갱신 (Right-click Apps · Gesture Apps 둘 다)
         if let idx = AppFilterMode.allCases.firstIndex(of: AppFilter.mode) {
             appFilterControls.modePopup?.selectItem(at: idx)
         }
@@ -1228,18 +1226,10 @@ final class SettingsWindow: NSObject,
             gestureFilterControls.modePopup?.selectItem(at: idx)
         }
         gestureFilterControls.textView?.string = GestureAppFilter.patternsText
-        // Browser List 체크박스 갱신 — 현재 disabled 셋에 있으면 OFF.
         let disabled = BrowserPreferences.disabledBundleIDs
         for cb in browserCheckboxes {
             if let bundleID = cb.identifier?.rawValue {
                 cb.state = disabled.contains(bundleID) ? .off : .on
-            }
-        }
-        if collapseAdvanced {
-            // chevron 이미지는 alternateImage가 시스템적으로 토글하므로 별도 라벨 갱신 불필요.
-            for controls in [appFilterControls, gestureFilterControls] {
-                controls.disclosure?.state = .off
-                controls.advancedStack?.isHidden = true
             }
         }
         refreshCustomList()
@@ -1309,7 +1299,7 @@ final class SettingsWindow: NSObject,
         present(alert) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             ConfigIO.apply(snap)
-            self?.refreshAllControlsFromStorage(collapseAdvanced: false)
+            self?.refreshAllControlsFromStorage()
         }
     }
 
@@ -1327,7 +1317,6 @@ final class SettingsWindow: NSObject,
         present(alert)
     }
 
-    /// 시트 부착 가능한 윈도우가 있으면 시트로, 아니면 modal로 표시. NSSavePanel/NSOpenPanel 공통.
     private func present(_ panel: NSSavePanel,
                          completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window = window {
@@ -1337,7 +1326,6 @@ final class SettingsWindow: NSObject,
         }
     }
 
-    /// NSAlert 버전. completion 기본값으로 fire-and-forget 케이스도 커버.
     private func present(_ alert: NSAlert,
                          completion: @escaping (NSApplication.ModalResponse) -> Void = { _ in }) {
         if let window = window {
