@@ -1,9 +1,41 @@
 import AppKit
 
-/// 액션 종류 — 빌트인 BrowserAction과 사용자 정의 단축키를 분기.
+/// 액션 종류 — 빌트인 BrowserAction / 사용자 정의 단축키 / 마우스 동작.
 private enum ActionKind: Int {
     case builtin = 0
     case shortcut = 1
+    case mouse = 2
+}
+
+/// Mouse Action popup의 항목. middleClick은 lines가 의미 없음.
+private enum MouseChoice: Int, CaseIterable {
+    case scrollUp = 0
+    case scrollDown
+    case scrollLeft
+    case scrollRight
+    case middleClick
+
+    var label: String {
+        switch self {
+        case .scrollUp:    return "Scroll Up"
+        case .scrollDown:  return "Scroll Down"
+        case .scrollLeft:  return "Scroll Left"
+        case .scrollRight: return "Scroll Right"
+        case .middleClick: return "Middle Click"
+        }
+    }
+
+    var hasLines: Bool { self != .middleClick }
+
+    func toMouseAction(lines: Int) -> MouseAction {
+        switch self {
+        case .scrollUp:    return .scroll(direction: .up,    lines: lines)
+        case .scrollDown:  return .scroll(direction: .down,  lines: lines)
+        case .scrollLeft:  return .scroll(direction: .left,  lines: lines)
+        case .scrollRight: return .scroll(direction: .right, lines: lines)
+        case .middleClick: return .middleClick
+        }
+    }
 }
 
 final class AddGestureController: NSObject, NSWindowDelegate {
@@ -18,6 +50,11 @@ final class AddGestureController: NSObject, NSWindowDelegate {
     private weak var shortcutRow: NSStackView?
     private weak var shortcutLabel: NSTextField?
     private weak var shortcutRecordButton: NSButton?
+    private weak var mouseRow: NSStackView?
+    private weak var mousePopup: NSPopUpButton?
+    private weak var mouseLinesField: NSTextField?
+    private weak var mouseLinesStepper: NSStepper?
+    private weak var mouseLinesContainer: NSStackView?
     private weak var saveButton: NSButton?
     private weak var cancelButton: NSButton?
 
@@ -121,6 +158,8 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         kindPopup.item(at: 0)?.tag = ActionKind.builtin.rawValue
         kindPopup.addItem(withTitle: "Custom Shortcut")
         kindPopup.item(at: 1)?.tag = ActionKind.shortcut.rawValue
+        kindPopup.addItem(withTitle: "Mouse Action")
+        kindPopup.item(at: 2)?.tag = ActionKind.mouse.rawValue
         kindPopup.target = self
         kindPopup.action = #selector(actionKindChanged(_:))
         kindPopup.translatesAutoresizingMaskIntoConstraints = false
@@ -178,6 +217,66 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         shortcutRow.addArrangedSubview(recordButton)
         self.shortcutRow = shortcutRow
         root.addArrangedSubview(shortcutRow)
+
+        // Mouse action row
+        let mouseRow = NSStackView()
+        mouseRow.orientation = .horizontal
+        mouseRow.spacing = 10
+        mouseRow.alignment = .centerY
+
+        let mouseHead = NSTextField(labelWithString: "Mouse:")
+        mouseHead.font = .systemFont(ofSize: 13)
+        mouseHead.textColor = .secondaryLabelColor
+        mouseRow.addArrangedSubview(mouseHead)
+
+        let mPopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 200, height: 26))
+        for choice in MouseChoice.allCases {
+            let item = NSMenuItem(title: choice.label, action: nil, keyEquivalent: "")
+            item.tag = choice.rawValue
+            mPopup.menu?.addItem(item)
+        }
+        mPopup.target = self
+        mPopup.action = #selector(mouseChoiceChanged(_:))
+        mPopup.translatesAutoresizingMaskIntoConstraints = false
+        mPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        self.mousePopup = mPopup
+        mouseRow.addArrangedSubview(mPopup)
+
+        // Lines container — scroll 액션일 때만 표시
+        let linesContainer = NSStackView()
+        linesContainer.orientation = .horizontal
+        linesContainer.spacing = 6
+        linesContainer.alignment = .centerY
+
+        let linesLabel = NSTextField(labelWithString: "lines:")
+        linesLabel.font = .systemFont(ofSize: 12)
+        linesLabel.textColor = .secondaryLabelColor
+        linesContainer.addArrangedSubview(linesLabel)
+
+        let linesField = NSTextField()
+        linesField.stringValue = "3"
+        linesField.alignment = .right
+        linesField.font = .systemFont(ofSize: 13)
+        linesField.translatesAutoresizingMaskIntoConstraints = false
+        linesField.widthAnchor.constraint(equalToConstant: 50).isActive = true
+        self.mouseLinesField = linesField
+        linesContainer.addArrangedSubview(linesField)
+
+        let stepper = NSStepper()
+        stepper.minValue = 1
+        stepper.maxValue = 50
+        stepper.increment = 1
+        stepper.integerValue = 3
+        stepper.target = self
+        stepper.action = #selector(linesStepperChanged(_:))
+        self.mouseLinesStepper = stepper
+        linesContainer.addArrangedSubview(stepper)
+
+        self.mouseLinesContainer = linesContainer
+        mouseRow.addArrangedSubview(linesContainer)
+
+        self.mouseRow = mouseRow
+        root.addArrangedSubview(mouseRow)
 
         // Footer (Clear / Cancel / Save)
         let footer = NSStackView()
@@ -251,6 +350,8 @@ final class AddGestureController: NSObject, NSWindowDelegate {
             saveButton?.isEnabled = true
         case .shortcut:
             saveButton?.isEnabled = (capturedShortcut != nil)
+        case .mouse:
+            saveButton?.isEnabled = true
         }
     }
 
@@ -259,21 +360,47 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         return ActionKind(rawValue: raw) ?? .builtin
     }
 
+    private func currentMouseChoice() -> MouseChoice {
+        let raw = mousePopup?.selectedItem?.tag ?? MouseChoice.scrollUp.rawValue
+        return MouseChoice(rawValue: raw) ?? .scrollUp
+    }
+
     private func applyActionKind(_ kind: ActionKind) {
         switch kind {
         case .builtin:
             actionRow?.isHidden = false
             shortcutRow?.isHidden = true
+            mouseRow?.isHidden = true
             stopRecordingShortcut(restoreUI: true)
         case .shortcut:
             actionRow?.isHidden = true
             shortcutRow?.isHidden = false
+            mouseRow?.isHidden = true
+        case .mouse:
+            actionRow?.isHidden = true
+            shortcutRow?.isHidden = true
+            mouseRow?.isHidden = false
+            stopRecordingShortcut(restoreUI: true)
+            updateMouseLinesVisibility()
         }
         updateSaveEnabled()
     }
 
+    /// scroll 선택일 때만 lines 입력란을 보여 준다.
+    private func updateMouseLinesVisibility() {
+        mouseLinesContainer?.isHidden = !currentMouseChoice().hasLines
+    }
+
     @objc private func actionKindChanged(_ sender: NSPopUpButton) {
         applyActionKind(currentActionKind())
+    }
+
+    @objc private func mouseChoiceChanged(_ sender: NSPopUpButton) {
+        updateMouseLinesVisibility()
+    }
+
+    @objc private func linesStepperChanged(_ sender: NSStepper) {
+        mouseLinesField?.integerValue = sender.integerValue
     }
 
     @objc private func clearTapped() {
@@ -296,6 +423,10 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         case .shortcut:
             guard let shortcut = capturedShortcut else { return }
             action = .shortcut(shortcut)
+        case .mouse:
+            let choice = currentMouseChoice()
+            let lines = max(1, min(50, mouseLinesField?.integerValue ?? 3))
+            action = .mouse(choice.toMouseAction(lines: lines))
         }
         let def = GestureDefinition(pattern: pattern, action: action)
         CustomGestureMappings.upsert(def)

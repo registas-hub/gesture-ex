@@ -1,8 +1,9 @@
+import AppKit
 import CoreGraphics
 
 struct ActionExecutor {
     /// GestureAction을 활성 앱에 전달한다.
-    /// 빌트인 BrowserAction이면 미리 정의된 keyCode/flags를, 사용자 단축키면 녹화된 값을 발사한다.
+    /// 빌트인/사용자 단축키는 키스트로크, 마우스 액션은 휠/버튼 이벤트로 합성한다.
     /// disabled 액션은 noop.
     static func execute(_ action: GestureAction) {
         switch action {
@@ -11,6 +12,8 @@ struct ActionExecutor {
             postKey(keyCode: keyCode, flags: browserAction.flags)
         case .shortcut(let shortcut):
             postKey(keyCode: CGKeyCode(shortcut.keyCode), flags: shortcut.cgFlags)
+        case .mouse(let mouseAction):
+            postMouse(mouseAction)
         }
     }
 
@@ -25,6 +28,64 @@ struct ActionExecutor {
         }
         down.flags = flags
         up.flags = flags
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+
+    private static func postMouse(_ action: MouseAction) {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        switch action {
+        case .scroll(let direction, let lines):
+            postScroll(source: source, direction: direction, lines: lines)
+        case .middleClick:
+            postMiddleClick(source: source)
+        }
+    }
+
+    /// 휠 이벤트는 line 단위로 합성한다.
+    /// wheel1=세로(양수=위), wheel2=가로(양수=오른쪽). 사용자가 입력한 lines는 항상 양수,
+    /// down/left일 때만 부호를 뒤집어 보낸다.
+    private static func postScroll(source: CGEventSource?,
+                                    direction: MouseScrollDirection,
+                                    lines: Int) {
+        let magnitude = Int32(max(1, lines))
+        let signed: Int32
+        switch direction {
+        case .up, .right:    signed = magnitude
+        case .down, .left:   signed = -magnitude
+        }
+        let event: CGEvent?
+        if direction.isHorizontal {
+            event = CGEvent(scrollWheelEvent2Source: source,
+                            units: .line,
+                            wheelCount: 2,
+                            wheel1: 0, wheel2: signed, wheel3: 0)
+        } else {
+            event = CGEvent(scrollWheelEvent2Source: source,
+                            units: .line,
+                            wheelCount: 1,
+                            wheel1: signed, wheel2: 0, wheel3: 0)
+        }
+        event?.post(tap: .cghidEventTap)
+    }
+
+    /// 휠 버튼 클릭. 종료 좌표(현재 마우스 위치)에 down/up 한 쌍을 발사한다.
+    /// NSEvent.mouseLocation은 bottom-left 좌표라 CGEvent용 top-left로 변환한다.
+    private static func postMiddleClick(source: CGEventSource?) {
+        let nsLoc = NSEvent.mouseLocation
+        let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+        let cgPoint = CGPoint(x: nsLoc.x, y: screenHeight - nsLoc.y)
+
+        guard let down = CGEvent(mouseEventSource: source,
+                                  mouseType: .otherMouseDown,
+                                  mouseCursorPosition: cgPoint,
+                                  mouseButton: .center),
+              let up = CGEvent(mouseEventSource: source,
+                                mouseType: .otherMouseUp,
+                                mouseCursorPosition: cgPoint,
+                                mouseButton: .center) else {
+            return
+        }
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }

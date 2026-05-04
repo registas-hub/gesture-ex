@@ -11,28 +11,33 @@ struct GesturePattern: Codable, Hashable {
     var isMultiSegment: Bool { directions.count >= 2 }
 }
 
-/// 제스처가 발사할 액션. 빌트인 BrowserAction이거나 사용자 정의 키보드 단축키.
+/// 제스처가 발사할 액션. 빌트인 BrowserAction, 사용자 정의 키보드 단축키, 또는 마우스 액션.
 enum GestureAction: Hashable {
     case builtin(BrowserAction)
     case shortcut(KeyShortcut)
+    case mouse(MouseAction)
 
-    /// 사용자에게 보여줄 액션 이름. shortcut은 "Custom: ⇧⌘A" 형식.
+    /// 사용자에게 보여줄 액션 이름.
     var label: String {
         switch self {
         case .builtin(let action):
             return action.label
         case .shortcut(let s):
             return "Custom: \(s.displayString)"
+        case .mouse(let m):
+            return m.label
         }
     }
 
-    /// 단축키 표시 문자열만 추출. 빌트인은 자체 단축키, custom은 displayString.
+    /// 단축키 표시 문자열만 추출. 빌트인은 자체 단축키, custom은 displayString, mouse는 nil.
     var shortcutLabel: String? {
         switch self {
         case .builtin(let action):
             return action.shortcutLabel
         case .shortcut(let s):
             return s.displayString
+        case .mouse:
+            return nil
         }
     }
 
@@ -45,10 +50,10 @@ enum GestureAction: Hashable {
 
 extension GestureAction: Codable {
     private enum Kind: String, Codable {
-        case builtin, shortcut
+        case builtin, shortcut, mouse
     }
     private enum CodingKeys: String, CodingKey {
-        case kind, builtin, shortcut
+        case kind, builtin, shortcut, mouse
     }
 
     func encode(to encoder: Encoder) throws {
@@ -60,6 +65,9 @@ extension GestureAction: Codable {
         case .shortcut(let s):
             try c.encode(Kind.shortcut, forKey: .kind)
             try c.encode(s, forKey: .shortcut)
+        case .mouse(let m):
+            try c.encode(Kind.mouse, forKey: .kind)
+            try c.encode(m, forKey: .mouse)
         }
     }
 
@@ -72,6 +80,8 @@ extension GestureAction: Codable {
                 self = .builtin(try c.decode(BrowserAction.self, forKey: .builtin))
             case .shortcut:
                 self = .shortcut(try c.decode(KeyShortcut.self, forKey: .shortcut))
+            case .mouse:
+                self = .mouse(try c.decode(MouseAction.self, forKey: .mouse))
             }
             return
         }
