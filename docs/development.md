@@ -10,7 +10,7 @@ gesture-ex/
 │   ├── main.swift             # entry point — NSApp boot
 │   ├── App/                   # AppDelegate, HotkeyManager
 │   ├── Core/                  # EventTapController, PathAnalyzer, ActionExecutor, BrowserDetector
-│   ├── Domain/                # GestureDirection, GesturePattern, BrowserAction, ...
+│   ├── Domain/                # GestureDirection, GesturePattern, GestureAction, BrowserAction, KeyShortcut, MouseAction, ...
 │   ├── Storage/               # GestureMappings, CustomGestureMappings, OverlayPreferences, AppFilter
 │   └── UI/                    # SettingsWindow, GestureTrailWindow, AddGestureController, ...
 ├── Resources/
@@ -20,8 +20,6 @@ gesture-ex/
 ├── docs/                      # this directory
 ├── Info.plist                 # Bundle metadata (CFBundleIconFile = AppIcon)
 ├── build.sh                   # swiftc + codesign + bundle
-├── create-signing-cert.sh     # one-time cert setup
-├── export-signing-cert.sh     # one-time secret registration for the release workflow
 ├── README.md
 └── .gitignore
 ```
@@ -53,7 +51,11 @@ This consumes the pre-configured bypass — no rule weakening involved. External
 2. Provide `keyCode`, `flags`, `label` for the new case
 3. Rebuild — the new action automatically appears in:
    - 4-direction mapping `popup`s
-   - Custom-gesture action picker
+   - Custom-gesture action picker (under **Type → Built-in Action**)
+
+For shortcuts you don't want to enshrine in `BrowserAction`, use the **Custom Shortcut** path in the *Add Custom Gesture* modal instead — `KeyShortcut` (`Sources/Domain/KeyShortcut.swift`) records an arbitrary `keyCode + CGEventFlags` pair from `NSEvent.keyDown`, and `GestureAction.shortcut(_:)` wraps it so `ActionExecutor.execute(_:)` synthesizes the keystroke the same way as built-ins. No code changes needed for one-off shortcuts.
+
+For non-keyboard input — wheel scrolling and middle-click — use the **Mouse Action** path. `MouseAction` (`Sources/Domain/MouseAction.swift`) is a small enum (`scroll(direction, lines)` / `middleClick`) wrapped by `GestureAction.mouse(_:)`. `ActionExecutor` lowers it to `CGEvent(scrollWheelEvent2Source:units:.line:wheelCount:wheel1:wheel2:wheel3:)` for scrolling (vertical via `wheel1`, horizontal via `wheel2`) and to `otherMouseDown/Up` at the cursor position for middle-click.
 
 ## Adding a new browser
 

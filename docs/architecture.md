@@ -34,8 +34,8 @@
 2. `rightMouseDown` is **swallowed** (callback returns `nil`). macOS's button-state machine never sees the press.
 3. `GestureTrailWindow` polls `NSEvent.mouseLocation` at 60 Hz, drawing the trail and recording the path in CGEvent coordinates.
 4. On `rightMouseUp`, `PathAnalyzer.analyze()` extracts a `GesturePattern` (array of `GestureDirection`) from the captured path.
-5. Mapping lookup: custom multi-segment patterns first → fallback to single-direction `GestureMappings`.
-6. `ActionExecutor` synthesizes a keyboard shortcut at HID level (`Cmd+[`, `Cmd+R`, …). The browser receives it as if the user pressed those keys.
+5. Mapping lookup: custom multi-segment patterns first → fallback to single-direction `GestureMappings`. A custom-pattern match resolves to a `GestureAction` — a built-in `BrowserAction`, a user-recorded `KeyShortcut`, or a `MouseAction` (scroll / middle-click).
+6. `ActionExecutor` synthesizes the corresponding HID-level event: a keyboard shortcut for built-ins and custom shortcuts (`Cmd+[`, `Cmd+R`, recorded `keyCode + CGEventFlags`, …), a `scrollWheelEvent2Source` line event for scroll actions, or `otherMouseDown/Up` at the gesture release position for middle-click. The browser (or any frontmost app) receives it as if the user actually performed the input.
 
 Because everything happens at HID level and the browser only sees a synthetic keyboard shortcut, **no extension conflicts**. Disable any pre-existing CrxMouse / Smartup / Gesturefy.
 
@@ -54,7 +54,7 @@ Adding a new browser = adding its bundle ID to `BrowserDetector.chromiumBundles`
 | Accessibility | Receive mouse events from HID layer |
 | Input Monitoring | Required for HID event taps on macOS 10.15+ |
 
-Both are scoped to the binary path, persisted by the self-signed code-signing identity (`RightClickOnUpDev`) created by `create-signing-cert.sh`. No data leaves the machine; no network calls.
+Both are scoped to the binary path, persisted by the self-signed code-signing identity (`RightClickOnUpDev`). No data leaves the machine; no network calls.
 
 ## Notable design decisions
 
