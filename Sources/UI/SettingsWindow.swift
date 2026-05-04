@@ -400,7 +400,13 @@ final class SettingsWindow: NSObject,
     private func buildGestureAppsBody() -> NSStackView {
         return buildBundleIDFilterPage(
             title: "Apps for Mouse Gestures",
-            description: "Choose which apps fire mouse gestures. By default gestures run in every supported browser; use this to limit them further (combined with the per-engine toggles in the menu bar).",
+            description: """
+            Choose which apps fire mouse gestures. \
+            All apps mode (default): gestures run in every supported browser only. \
+            Whitelist: gestures run ONLY in the listed apps — non-browsers included, engine check is bypassed. \
+            Blacklist: gestures run in every supported browser except the listed ones. \
+            Note: in non-browser apps the gesture actions still fire keyboard shortcuts (⌘[, ⌘R, …) which may have different meanings.
+            """,
             target: .gestureFilter,
             initialMode: GestureAppFilter.mode,
             initialPatterns: GestureAppFilter.patternsText,
@@ -532,28 +538,38 @@ final class SettingsWindow: NSObject,
     }
 
     private func makePopup(for direction: GestureDirection) -> NSPopUpButton {
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
         for action in BrowserAction.allCases {
-            popup.addItem(withTitle: action.label)
+            let item = NSMenuItem(title: action.menuTitle, action: nil, keyEquivalent: "")
+            item.representedObject = action
+            popup.menu?.addItem(item)
             // separator 흉내: disabled 항목 다음에 구분선 한 줄
             if action == .disabled {
                 popup.menu?.addItem(NSMenuItem.separator())
             }
         }
-        let current = GestureMappings.action(for: direction)
-        popup.selectItem(withTitle: current.label)
+        Self.selectAction(GestureMappings.action(for: direction), in: popup)
         popup.target = self
         popup.action = #selector(popupChanged(_:))
         popup.tag = direction.rawValue
         popup.translatesAutoresizingMaskIntoConstraints = false
-        popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
         return popup
+    }
+
+    /// representedObject 기반으로 BrowserAction에 해당하는 메뉴 항목을 선택한다.
+    /// menuTitle이 라벨+단축키 조합이라 title 매칭이 더 이상 안전하지 않으므로 representedObject를 사용.
+    private static func selectAction(_ action: BrowserAction, in popup: NSPopUpButton) {
+        if let idx = popup.menu?.items.firstIndex(where: {
+            ($0.representedObject as? BrowserAction) == action
+        }) {
+            popup.selectItem(at: idx)
+        }
     }
 
     @objc private func popupChanged(_ sender: NSPopUpButton) {
         guard let direction = GestureDirection(rawValue: sender.tag),
-              let title = sender.titleOfSelectedItem,
-              let action = BrowserAction.allCases.first(where: { $0.label == title }) else {
+              let action = sender.selectedItem?.representedObject as? BrowserAction else {
             return
         }
         GestureMappings.setAction(action, for: direction)
@@ -764,8 +780,7 @@ final class SettingsWindow: NSObject,
         GestureAppFilter.resetToDefaults()
         // 매핑 popup 갱신
         for (direction, popup) in popups {
-            let current = GestureMappings.action(for: direction)
-            popup.selectItem(withTitle: current.label)
+            Self.selectAction(GestureMappings.action(for: direction), in: popup)
         }
         // 오버레이 컨트롤 갱신
         trailColorWell?.color = OverlayPreferences.trailColor

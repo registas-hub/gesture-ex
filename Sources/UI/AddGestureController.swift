@@ -99,12 +99,12 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         actionHead.textColor = .secondaryLabelColor
         actionRow.addArrangedSubview(actionHead)
 
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 240, height: 26))
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
         for action in actionChoices {
-            popup.addItem(withTitle: action.label)
+            popup.addItem(withTitle: action.menuTitle)
         }
         popup.translatesAutoresizingMaskIntoConstraints = false
-        popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
         self.actionPopup = popup
         actionRow.addArrangedSubview(popup)
         root.addArrangedSubview(actionRow)
