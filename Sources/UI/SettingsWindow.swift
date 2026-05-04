@@ -744,6 +744,16 @@ final class SettingsWindow: NSObject,
             actionLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
             row.addArrangedSubview(actionLabel)
 
+            let editButton = NSButton(
+                title: "Edit",
+                target: self,
+                action: #selector(editCustomGesture(_:))
+            )
+            editButton.bezelStyle = .roundRect
+            editButton.controlSize = .small
+            editButton.tag = idx
+            row.addArrangedSubview(editButton)
+
             let removeButton = NSButton(
                 title: "Remove",
                 target: self,
@@ -760,6 +770,13 @@ final class SettingsWindow: NSObject,
 
     @objc private func showAddGesture() {
         AddGestureController.shared.show()
+    }
+
+    @objc private func editCustomGesture(_ sender: NSButton) {
+        let all = CustomGestureMappings.all
+        let idx = sender.tag
+        guard idx >= 0, idx < all.count else { return }
+        AddGestureController.shared.show(editing: all[idx])
     }
 
     @objc private func removeCustomGesture(_ sender: NSButton) {

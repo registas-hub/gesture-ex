@@ -61,19 +61,29 @@ final class AddGestureController: NSObject, NSWindowDelegate {
     private var capturedPattern: GesturePattern?
     private var capturedShortcut: KeyShortcut?
 
+    /// 편집 모드 진입 시 원본 패턴. 저장 직전 비교해 패턴이 바뀌었으면 기존 항목을 먼저 제거한다.
+    /// nil이면 새 항목 추가 모드.
+    private var editingOriginalPattern: GesturePattern?
+
     /// 단축키 녹화 모드일 때 활성된 NSEvent monitor.
     private var keyMonitor: Any?
 
     /// disabled 제외한 액션 목록 — 사용자가 disabled를 등록하는 건 의미 없음
     private let actionChoices: [BrowserAction] = BrowserAction.allCases.filter { $0 != .disabled }
 
+    /// 신규 추가용 진입점.
     func show() {
-        if let w = window {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
+        show(editing: nil)
+    }
+
+    /// 편집 진입점. nil이면 신규 추가.
+    func show(editing definition: GestureDefinition?) {
+        if window == nil {
+            buildAndShow()
         }
-        buildAndShow()
+        prefill(with: definition)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func buildAndShow() {
@@ -89,11 +99,66 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         w.contentView = buildContent()
         w.center()
         self.window = w
-        clearCapture()
-        applyActionKind(.builtin)
 
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 편집 / 신규 진입 시 윈도우 컨트롤 상태를 한 번에 셋업한다.
+    private func prefill(with def: GestureDefinition?) {
+        editingOriginalPattern = def?.pattern
+        clearCapture()
+
+        guard let def = def else {
+            applyActionKind(.builtin)
+            window?.title = "Add Custom Gesture"
+            saveButton?.title = "Save"
+            return
+        }
+
+        // 패턴 프리필 — 캔버스는 비어있되 라벨/내부값은 원본 패턴을 유지.
+        // 사용자가 다시 그리면 그것이 새 패턴이 된다.
+        capturedPattern = def.pattern
+        patternLabel?.stringValue = def.pattern.displayString
+
+        // 액션 종류별 프리필
+        switch def.action {
+        case .builtin(let action):
+            applyActionKind(.builtin)
+            actionKindPopup?.selectItem(withTag: ActionKind.builtin.rawValue)
+            if let idx = actionChoices.firstIndex(of: action) {
+                actionPopup?.selectItem(at: idx)
+            }
+        case .shortcut(let s):
+            applyActionKind(.shortcut)
+            actionKindPopup?.selectItem(withTag: ActionKind.shortcut.rawValue)
+            capturedShortcut = s
+            shortcutLabel?.stringValue = s.displayString
+            shortcutRecordButton?.title = "Re-record"
+        case .mouse(let m):
+            applyActionKind(.mouse)
+            actionKindPopup?.selectItem(withTag: ActionKind.mouse.rawValue)
+            switch m {
+            case .scroll(let dir, let lines):
+                let choice: MouseChoice
+                switch dir {
+                case .up:    choice = .scrollUp
+                case .down:  choice = .scrollDown
+                case .left:  choice = .scrollLeft
+                case .right: choice = .scrollRight
+                }
+                mousePopup?.selectItem(withTag: choice.rawValue)
+                mouseLinesField?.integerValue = lines
+                mouseLinesStepper?.integerValue = lines
+            case .middleClick:
+                mousePopup?.selectItem(withTag: MouseChoice.middleClick.rawValue)
+            }
+            updateMouseLinesVisibility()
+        }
+
+        window?.title = "Edit Custom Gesture"
+        saveButton?.title = "Update"
+        updateSaveEnabled()
     }
 
     private func buildContent() -> NSView {
@@ -428,6 +493,11 @@ final class AddGestureController: NSObject, NSWindowDelegate {
             let lines = max(1, min(50, mouseLinesField?.integerValue ?? 3))
             action = .mouse(choice.toMouseAction(lines: lines))
         }
+        // 편집 모드에서 패턴이 바뀌었으면 기존 항목을 먼저 정리.
+        // upsert가 같은 패턴은 알아서 덮어쓰므로 패턴이 그대로일 땐 추가 작업 불필요.
+        if let original = editingOriginalPattern, original != pattern {
+            CustomGestureMappings.remove(pattern: original)
+        }
         let def = GestureDefinition(pattern: pattern, action: action)
         CustomGestureMappings.upsert(def)
         NotificationCenter.default.post(name: .customGesturesChanged, object: nil)
@@ -487,6 +557,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         stopRecordingShortcut(restoreUI: false)
+        editingOriginalPattern = nil
         clearCapture()
     }
 }
