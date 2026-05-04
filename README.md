@@ -28,9 +28,13 @@ On Windows / Linux, right-click triggers the context menu when the button is **r
 
 ```bash
 brew install --cask --no-quarantine registas-hub/tap/gesture-ex
+
+# If you forgot --no-quarantine (or already had the cask installed),
+# strip the quarantine flag manually so Gatekeeper stops blocking the launch:
+xattr -dr com.apple.quarantine /Applications/gesture-ex.app
 ```
 
-Or download `gesture-ex-vX.Y.Z.zip` from [Releases](https://github.com/registas-hub/gesture-ex/releases/latest), drag to `/Applications`, and bypass Gatekeeper with `xattr -dr com.apple.quarantine /Applications/gesture-ex.app` — see [Installation](docs/installation.md) for details and the GUI alternative.
+`--no-quarantine` and the `xattr` recovery line are both required because the app is self-signed (not Apple Developer ID) and not notarized — without them, macOS shows *“cannot be opened…”* on first launch. Either flag prevents that. The GUI alternative (System Settings → **Open Anyway**) works too — see [Installation](docs/installation.md) for the full walkthrough and a manual zip download.
 
 After install, grant **Accessibility** + **Input Monitoring** in *System Settings → Privacy & Security*, then toggle the menu-bar item ON. Global hotkey **⌥⌘G** toggles anywhere.
 
