@@ -37,6 +37,16 @@ open gesture-ex.app
 
 Stable code-signing identity means the rebuilt binary has the same code-signing authority — TCC keeps the previously granted permissions. **No re-authorization on rebuild.** See [Architecture · Notable design decisions](architecture.md#notable-design-decisions) for the rationale.
 
+## Pull request workflow
+
+`main` is protected by a repository ruleset that requires **1 approving review** before merge. The maintainer's `OrganizationAdmin` role is registered as a bypass actor, so solo merges go through with the admin flag:
+
+```bash
+gh pr merge <#> --squash --admin
+```
+
+This consumes the pre-configured bypass — no rule weakening involved. External contributor PRs are unaffected and still require a review. `--delete-branch` is redundant: `delete_branch_on_merge` is enabled at the repo level. Squash is the only allowed merge method (`allow_merge_commit = false`, `allow_rebase_merge = false`), so omitting `--squash` will fail.
+
 ## Adding a new action
 
 1. Add a `case` to `BrowserAction` (`Sources/Domain/BrowserAction.swift`)
