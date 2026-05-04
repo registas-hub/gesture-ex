@@ -1,6 +1,9 @@
 # Tag push (vX.Y.Z) 시 자동으로 build → zip → SHA256 → GitHub Release 생성.
 # 로컬 create-release.sh의 [1/5]~[4/5] 단계를 대체한다.
 #
+# workflow_dispatch로도 수동 실행 가능 (secret/workflow 자체를 빠르게 검증할 때).
+# dry-run=true면 build/zip/sha만 수행하고 release 생성/asset 업로드는 건너뛴다.
+#
 # 필요한 secrets (Settings → Secrets and variables → Actions):
 #   SIGNING_CERT_P12_BASE64   ./export-signing-cert.sh로 추출한 base64 cert
 #   SIGNING_CERT_PASSWORD     export 시 입력한 .p12 password
@@ -11,6 +14,17 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for the dry-run zip (e.g. v0.3.0-dry)'
+        required: true
+        default: 'v0.0.0-dry'
+      dry_run:
+        description: 'Skip release creation/upload — build/zip/sha만 검증'
+        required: true
+        default: true
+        type: boolean
 
 jobs:
   release:
@@ -23,7 +37,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve version label
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Import signing certificate
+        if: ${{ env.HAS_CERT == 'true' }}
+        env:
+          HAS_CERT: ${{ secrets.SIGNING_CERT_P12_BASE64 != '' }}
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
@@ -37,7 +63,7 @@ jobs:
       - name: Package zip + SHA256
         id: package
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${{ steps.ver.outputs.value }}"
           ZIP="gesture-ex-${VERSION}.zip"
           ditto -c -k --keepParent gesture-ex.app "$ZIP"
           SHA=$(shasum -a 256 "$ZIP" | awk '{print $1}')
@@ -46,8 +72,22 @@ jobs:
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
           echo "size=$SIZE" >> "$GITHUB_OUTPUT"
           echo "version_no_v=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Build summary"
+            echo "- version: \`$VERSION\`"
+            echo "- zip: \`$ZIP\` ($SIZE)"
+            echo "- sha256: \`$SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact (always — useful in dry-run too)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.zip }}
+          path: ${{ steps.package.outputs.zip }}
+          retention-days: 7
 
       - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.package.outputs.zip }}
