@@ -20,18 +20,7 @@ brew install --cask --no-quarantine registas-hub/tap/gesture-ex
 
 Upgrade with `brew upgrade --cask gesture-ex`. Uninstall with `brew uninstall --cask gesture-ex`.
 
-> **Tap status**: the `registas-hub/homebrew-tap` repository hosting the cask is on the roadmap. Until it ships, every release embeds a `Cask metadata` block in the release notes — drop the three fields into the template below as `gesture-ex.rb`, then `brew install --cask --no-quarantine ./gesture-ex.rb`:
-> ```ruby
-> cask "gesture-ex" do
->   version "X.Y.Z"          # paste from release notes
->   sha256 "<64-char-hex>"   # paste from release notes
->   url "https://github.com/registas-hub/gesture-ex/releases/download/v#{version}/gesture-ex-v#{version}.zip"
->   name "gesture-ex"
->   desc "Right-click on mouse-up + mouse gestures for macOS browsers"
->   homepage "https://github.com/registas-hub/gesture-ex"
->   app "gesture-ex.app"
-> end
-> ```
+The cask lives at [registas-hub/homebrew-tap](https://github.com/registas-hub/homebrew-tap). Each release auto-publishes its `version` / `sha256` / `url` to the release notes, and the tap is updated separately.
 
 ## Download a pre-built release
 
