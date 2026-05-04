@@ -64,6 +64,9 @@ final class SettingsWindow: NSObject,
     private weak var gestureFilterModePopup: NSPopUpButton?
     private weak var gestureFilterTextView: NSTextView?
 
+    /// Browser List 체크박스. Reset to Defaults 시 일괄 갱신용으로 보관.
+    private var browserCheckboxes: [NSButton] = []
+
     // 사이드바/페이지 컨테이너
     private weak var sidebarTable: NSTableView?
     private weak var pagesTabView: NSTabView?
@@ -398,14 +401,14 @@ final class SettingsWindow: NSObject,
 
     /// 마우스 제스처 인식의 적용 대상 앱 설정 페이지.
     private func buildGestureAppsBody() -> NSStackView {
-        return buildBundleIDFilterPage(
+        let stack = buildBundleIDFilterPage(
             title: "Apps for Mouse Gestures",
             description: """
-            Choose which apps fire mouse gestures. \
-            All apps mode (default): gestures run in every supported browser only. \
-            Whitelist: gestures run in supported browsers (auto-included) PLUS the apps you list — for the listed apps the engine check is bypassed, so non-browsers like Warp can be added. \
-            Blacklist: gestures run in every supported browser except the listed ones. \
-            Note: in non-browser apps the gesture actions still fire keyboard shortcuts (⌘[, ⌘R, …) which may have different meanings.
+            Choose which apps fire mouse gestures.
+
+            • All apps (default): supported browsers only.
+            • Whitelist: supported browsers + listed apps (any app type).
+            • Blacklist: supported browsers except listed apps.
             """,
             target: .gestureFilter,
             initialMode: GestureAppFilter.mode,
@@ -413,6 +416,73 @@ final class SettingsWindow: NSObject,
             storeModePopup: { [weak self] in self?.gestureFilterModePopup = $0 },
             storeTextView: { [weak self] in self?.gestureFilterTextView = $0 }
         )
+        appendBrowserListSection(to: stack)
+        return stack
+    }
+
+    /// "Supported Browsers" 하위 섹션 — Gesture Apps 페이지 하단에 붙는다.
+    /// 사용자가 카탈로그 브라우저를 개별 enable/disable 할 수 있다.
+    private func appendBrowserListSection(to stack: NSStackView) {
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.widthAnchor.constraint(greaterThanOrEqualToConstant: 460).isActive = true
+        stack.addArrangedSubview(divider)
+
+        let title = NSTextField(labelWithString: "Supported Browsers")
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        stack.addArrangedSubview(title)
+
+        let desc = NSTextField(wrappingLabelWithString:
+            "Uncheck a browser to exclude it from auto-detection. " +
+            "Disabled browsers behave like any other non-browser app — gestures only fire if you add them to the Whitelist.")
+        desc.font = .systemFont(ofSize: 11)
+        desc.textColor = .secondaryLabelColor
+        desc.preferredMaxLayoutWidth = 460
+        stack.addArrangedSubview(desc)
+
+        browserCheckboxes.removeAll()
+        appendBrowserGroup(.chromium, header: "Chromium engine", to: stack)
+        appendBrowserGroup(.webkit,   header: "WebKit engine",   to: stack)
+    }
+
+    private func appendBrowserGroup(_ engine: BrowserEngine, header: String, to stack: NSStackView) {
+        let head = NSTextField(labelWithString: header)
+        head.font = .systemFont(ofSize: 12, weight: .semibold)
+        head.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(head)
+
+        let entries = BrowserDetector.catalog.filter { $0.engine == engine }
+        let grid = NSGridView()
+        grid.rowSpacing = 4
+        grid.columnSpacing = 24
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        for pair in stride(from: 0, to: entries.count, by: 2) {
+            let left = makeBrowserCheckbox(entries[pair])
+            let right: NSView = (pair + 1 < entries.count)
+                ? makeBrowserCheckbox(entries[pair + 1])
+                : NSView()
+            grid.addRow(with: [left, right])
+        }
+        stack.addArrangedSubview(grid)
+    }
+
+    private func makeBrowserCheckbox(_ entry: BrowserCatalogEntry) -> NSButton {
+        let cb = NSButton(
+            checkboxWithTitle: entry.displayName,
+            target: self,
+            action: #selector(browserToggleChanged(_:))
+        )
+        cb.state = BrowserPreferences.isEnabled(entry.bundleID) ? .on : .off
+        cb.toolTip = entry.bundleID
+        cb.identifier = NSUserInterfaceItemIdentifier(entry.bundleID)
+        browserCheckboxes.append(cb)
+        return cb
+    }
+
+    @objc private func browserToggleChanged(_ sender: NSButton) {
+        guard let bundleID = sender.identifier?.rawValue else { return }
+        BrowserPreferences.setEnabled(sender.state == .on, for: bundleID)
     }
 
     /// Mouse-up Apps와 Gesture Apps가 공유하는 bundle ID pattern filter 페이지 빌더.
@@ -795,6 +865,7 @@ final class SettingsWindow: NSObject,
         CustomGestureMappings.resetAll()
         AppFilter.resetToDefaults()
         GestureAppFilter.resetToDefaults()
+        BrowserPreferences.resetToDefaults()
         // 매핑 popup 갱신
         for (direction, popup) in popups {
             Self.selectAction(GestureMappings.action(for: direction), in: popup)
@@ -820,6 +891,10 @@ final class SettingsWindow: NSObject,
             gestureFilterModePopup?.selectItem(at: idx)
         }
         gestureFilterTextView?.string = GestureAppFilter.patternsText
+        // Browser List 체크박스를 모두 ON으로 (disabled 셋이 비었으므로)
+        for cb in browserCheckboxes {
+            cb.state = .on
+        }
         refreshCustomList()
     }
 

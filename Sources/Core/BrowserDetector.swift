@@ -1,50 +1,82 @@
 import AppKit
 
+/// 브라우저 엔진 식별자. 사용자에게 보여주는 라벨 이상의 의미는 없다 —
+/// 두 엔진 모두 같은 키 단축키로 동작하므로 분기 자체에 영향은 없음.
+enum BrowserEngine: String {
+    case chromium = "Chromium"
+    case webkit = "WebKit"
+}
+
+/// 브라우저 카탈로그 한 항목.
+struct BrowserCatalogEntry {
+    let displayName: String
+    let bundleID: String
+    let engine: BrowserEngine
+}
+
 struct BrowserDetector {
-    /// 알려진 Chromium 기반 브라우저 bundle ID.
-    static let chromiumBundles: Set<String> = [
+    /// 정적 카탈로그. UI에 보여줄 displayName과 그룹화를 위해 카테고리 enum까지 함께 보관한다.
+    /// 새 브라우저 추가 시 이 배열 한 곳에만 손대면 된다.
+    static let catalog: [BrowserCatalogEntry] = [
         // Chromium 공식 오픈소스 빌드
-        "org.chromium.Chromium",
+        .init(displayName: "Chromium",          bundleID: "org.chromium.Chromium",        engine: .chromium),
         // Google Chrome (모든 채널)
-        "com.google.Chrome",
-        "com.google.Chrome.beta",
-        "com.google.Chrome.canary",
-        "com.google.Chrome.dev",
+        .init(displayName: "Chrome",            bundleID: "com.google.Chrome",            engine: .chromium),
+        .init(displayName: "Chrome Beta",       bundleID: "com.google.Chrome.beta",       engine: .chromium),
+        .init(displayName: "Chrome Canary",     bundleID: "com.google.Chrome.canary",     engine: .chromium),
+        .init(displayName: "Chrome Dev",        bundleID: "com.google.Chrome.dev",        engine: .chromium),
         // Microsoft Edge (모든 채널)
-        "com.microsoft.edgemac",
-        "com.microsoft.edgemac.Beta",
-        "com.microsoft.edgemac.Canary",
-        "com.microsoft.edgemac.Dev",
+        .init(displayName: "Edge",              bundleID: "com.microsoft.edgemac",        engine: .chromium),
+        .init(displayName: "Edge Beta",         bundleID: "com.microsoft.edgemac.Beta",   engine: .chromium),
+        .init(displayName: "Edge Canary",       bundleID: "com.microsoft.edgemac.Canary", engine: .chromium),
+        .init(displayName: "Edge Dev",          bundleID: "com.microsoft.edgemac.Dev",    engine: .chromium),
         // Brave
-        "com.brave.Browser",
-        "com.brave.Browser.beta",
-        "com.brave.Browser.nightly",
+        .init(displayName: "Brave",             bundleID: "com.brave.Browser",            engine: .chromium),
+        .init(displayName: "Brave Beta",        bundleID: "com.brave.Browser.beta",       engine: .chromium),
+        .init(displayName: "Brave Nightly",     bundleID: "com.brave.Browser.nightly",    engine: .chromium),
         // The Browser Company
-        "company.thebrowser.Browser",  // Arc
-        "company.thebrowser.dia",      // Dia
+        .init(displayName: "Arc",               bundleID: "company.thebrowser.Browser",   engine: .chromium),
+        .init(displayName: "Dia",               bundleID: "company.thebrowser.dia",       engine: .chromium),
         // Naver Whale
-        "com.naver.Whale",
+        .init(displayName: "Whale",             bundleID: "com.naver.Whale",              engine: .chromium),
         // Vivaldi
-        "com.vivaldi.Vivaldi",
+        .init(displayName: "Vivaldi",           bundleID: "com.vivaldi.Vivaldi",          engine: .chromium),
         // Opera (모든 변형)
-        "com.operasoftware.Opera",
-        "com.operasoftware.OperaGX",
-        "com.operasoftware.OperaNext",
+        .init(displayName: "Opera",             bundleID: "com.operasoftware.Opera",      engine: .chromium),
+        .init(displayName: "Opera GX",          bundleID: "com.operasoftware.OperaGX",    engine: .chromium),
+        .init(displayName: "Opera Next",        bundleID: "com.operasoftware.OperaNext",  engine: .chromium),
         // 기타 Chromium 기반
-        "com.coccoc.coccoc",
-        "ru.yandex.desktop.yandex-browser",
+        .init(displayName: "CocCoc",            bundleID: "com.coccoc.coccoc",            engine: .chromium),
+        .init(displayName: "Yandex",            bundleID: "ru.yandex.desktop.yandex-browser", engine: .chromium),
+
+        // WebKit (Safari 엔진 계열)
+        .init(displayName: "Safari",            bundleID: "com.apple.Safari",                  engine: .webkit),
+        .init(displayName: "Safari Technology Preview", bundleID: "com.apple.SafariTechnologyPreview", engine: .webkit),
+        .init(displayName: "Orion (Kagi)",      bundleID: "com.kagi.kagimacOS",           engine: .webkit),
+        .init(displayName: "Orion (alt id)",    bundleID: "io.kagi.orion",                engine: .webkit),
+        .init(displayName: "Orion",             bundleID: "com.kagi.orion",               engine: .webkit),
     ]
 
-    /// WebKit 기반(Safari 엔진 계열) 브라우저 bundle ID.
-    static let webkitBundles: Set<String> = [
-        "com.apple.Safari",
-        "com.apple.SafariTechnologyPreview",
-        "com.kagi.kagimacOS",       // Orion (Kagi)
-        "io.kagi.orion",            // Orion (alternate ID)
-        "com.kagi.orion",
-    ]
+    /// 사용자가 비활성화하지 않은 카탈로그 항목.
+    static var enabledCatalog: [BrowserCatalogEntry] {
+        let disabled = BrowserPreferences.disabledBundleIDs
+        return catalog.filter { !disabled.contains($0.bundleID) }
+    }
 
-    static let bundles: Set<String> = chromiumBundles.union(webkitBundles)
+    /// 활성 Chromium bundle ID 집합 (사용자 비활성 반영).
+    static var chromiumBundles: Set<String> {
+        Set(enabledCatalog.filter { $0.engine == .chromium }.map(\.bundleID))
+    }
+
+    /// 활성 WebKit bundle ID 집합 (사용자 비활성 반영).
+    static var webkitBundles: Set<String> {
+        Set(enabledCatalog.filter { $0.engine == .webkit }.map(\.bundleID))
+    }
+
+    /// 활성 브라우저 bundle ID 합집합.
+    static var bundles: Set<String> {
+        Set(enabledCatalog.map(\.bundleID))
+    }
 
     static var isFrontmost: Bool {
         guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
@@ -53,14 +85,13 @@ struct BrowserDetector {
         return bundles.contains(bundleID)
     }
 
-    /// 현재 활성 브라우저의 엔진을 식별 (메뉴 표시·디버깅용)
+    /// 현재 활성 브라우저의 엔진 라벨 (메뉴 표시·디버깅용). 비활성 처리된 브라우저면 nil.
     static var frontmostEngine: String? {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+              let entry = enabledCatalog.first(where: { $0.bundleID == bundleID }) else {
             return nil
         }
-        if chromiumBundles.contains(bundleID) { return "Chromium" }
-        if webkitBundles.contains(bundleID) { return "WebKit" }
-        return nil
+        return entry.engine.rawValue
     }
 }
 
