@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox  // kVK_Escape
 
 /// 액션 종류 — 빌트인 BrowserAction / 사용자 정의 단축키 / 마우스 동작.
 private enum ActionKind: Int {
@@ -7,7 +8,8 @@ private enum ActionKind: Int {
     case mouse = 2
 }
 
-/// Mouse Action popup의 항목. middleClick은 lines가 의미 없음.
+/// Mouse Action popup 항목. scroll 4종 + middleClick 1종이라 단순 인덱스 enum이 가장 간결하다.
+/// 라벨은 도메인 enum(MouseScrollDirection)에 위임해 popup ↔ 도메인 동기화 비용을 0으로 둔다.
 private enum MouseChoice: Int, CaseIterable {
     case scrollUp = 0
     case scrollDown
@@ -15,25 +17,33 @@ private enum MouseChoice: Int, CaseIterable {
     case scrollRight
     case middleClick
 
-    var label: String {
+    /// scroll 카테고리면 대응 direction, middleClick이면 nil.
+    var direction: MouseScrollDirection? {
         switch self {
-        case .scrollUp:    return "Scroll Up"
-        case .scrollDown:  return "Scroll Down"
-        case .scrollLeft:  return "Scroll Left"
-        case .scrollRight: return "Scroll Right"
-        case .middleClick: return "Middle Click"
+        case .scrollUp:    return .up
+        case .scrollDown:  return .down
+        case .scrollLeft:  return .left
+        case .scrollRight: return .right
+        case .middleClick: return nil
         }
     }
 
-    var hasLines: Bool { self != .middleClick }
+    var label: String { direction?.label ?? "Middle Click" }
+    var hasLines: Bool { direction != nil }
 
     func toMouseAction(lines: Int) -> MouseAction {
-        switch self {
-        case .scrollUp:    return .scroll(direction: .up,    lines: lines)
-        case .scrollDown:  return .scroll(direction: .down,  lines: lines)
-        case .scrollLeft:  return .scroll(direction: .left,  lines: lines)
-        case .scrollRight: return .scroll(direction: .right, lines: lines)
-        case .middleClick: return .middleClick
+        if let dir = direction {
+            return .scroll(direction: dir, lines: lines)
+        }
+        return .middleClick
+    }
+
+    static func from(_ direction: MouseScrollDirection) -> MouseChoice {
+        switch direction {
+        case .up:    return .scrollUp
+        case .down:  return .scrollDown
+        case .left:  return .scrollLeft
+        case .right: return .scrollRight
         }
     }
 }
@@ -116,43 +126,31 @@ final class AddGestureController: NSObject, NSWindowDelegate {
             return
         }
 
-        // 패턴 프리필 — 캔버스는 비어있되 라벨/내부값은 원본 패턴을 유지.
-        // 사용자가 다시 그리면 그것이 새 패턴이 된다.
         capturedPattern = def.pattern
         patternLabel?.stringValue = def.pattern.displayString
 
-        // 액션 종류별 프리필
         switch def.action {
         case .builtin(let action):
             applyActionKind(.builtin)
-            actionKindPopup?.selectItem(withTag: ActionKind.builtin.rawValue)
             if let idx = actionChoices.firstIndex(of: action) {
                 actionPopup?.selectItem(at: idx)
             }
         case .shortcut(let s):
             applyActionKind(.shortcut)
-            actionKindPopup?.selectItem(withTag: ActionKind.shortcut.rawValue)
             capturedShortcut = s
             shortcutLabel?.stringValue = s.displayString
             shortcutRecordButton?.title = "Re-record"
         case .mouse(let m):
             applyActionKind(.mouse)
-            actionKindPopup?.selectItem(withTag: ActionKind.mouse.rawValue)
-            switch m {
-            case .scroll(let dir, let lines):
-                let choice: MouseChoice
-                switch dir {
-                case .up:    choice = .scrollUp
-                case .down:  choice = .scrollDown
-                case .left:  choice = .scrollLeft
-                case .right: choice = .scrollRight
-                }
-                mousePopup?.selectItem(withTag: choice.rawValue)
+            let choice: MouseChoice
+            if case .scroll(let dir, let lines) = m {
+                choice = MouseChoice.from(dir)
                 mouseLinesField?.integerValue = lines
                 mouseLinesStepper?.integerValue = lines
-            case .middleClick:
-                mousePopup?.selectItem(withTag: MouseChoice.middleClick.rawValue)
+            } else {
+                choice = .middleClick
             }
+            mousePopup?.selectItem(withTag: choice.rawValue)
             updateMouseLinesVisibility()
         }
 
@@ -431,21 +429,15 @@ final class AddGestureController: NSObject, NSWindowDelegate {
     }
 
     private func applyActionKind(_ kind: ActionKind) {
-        switch kind {
-        case .builtin:
-            actionRow?.isHidden = false
-            shortcutRow?.isHidden = true
-            mouseRow?.isHidden = true
+        // popup 선택을 항상 동기화 — 외부에서 popup을 직접 만지지 않도록 단일 진입점으로 둔다.
+        actionKindPopup?.selectItem(withTag: kind.rawValue)
+        actionRow?.isHidden = (kind != .builtin)
+        shortcutRow?.isHidden = (kind != .shortcut)
+        mouseRow?.isHidden = (kind != .mouse)
+        if kind != .shortcut {
             stopRecordingShortcut(restoreUI: true)
-        case .shortcut:
-            actionRow?.isHidden = true
-            shortcutRow?.isHidden = false
-            mouseRow?.isHidden = true
-        case .mouse:
-            actionRow?.isHidden = true
-            shortcutRow?.isHidden = true
-            mouseRow?.isHidden = false
-            stopRecordingShortcut(restoreUI: true)
+        }
+        if kind == .mouse {
             updateMouseLinesVisibility()
         }
         updateSaveEnabled()
@@ -493,8 +485,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
             let lines = max(1, min(50, mouseLinesField?.integerValue ?? 3))
             action = .mouse(choice.toMouseAction(lines: lines))
         }
-        // 편집 모드에서 패턴이 바뀌었으면 기존 항목을 먼저 정리.
-        // upsert가 같은 패턴은 알아서 덮어쓰므로 패턴이 그대로일 땐 추가 작업 불필요.
+        // 패턴 자체가 바뀐 경우만 별도 remove. 같은 패턴은 upsert가 덮어쓴다.
         if let original = editingOriginalPattern, original != pattern {
             CustomGestureMappings.remove(pattern: original)
         }
@@ -524,7 +515,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
             // ESC 단독 — 녹화 취소
-            if event.keyCode == 0x35
+            if event.keyCode == UInt16(kVK_Escape)
                 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
                 self.stopRecordingShortcut(restoreUI: true)
                 return nil

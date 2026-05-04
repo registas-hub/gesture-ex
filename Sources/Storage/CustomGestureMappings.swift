@@ -3,15 +3,26 @@ import Foundation
 struct CustomGestureMappings {
     private static let key = "customGestures"
 
+    /// 디코딩 결과 캐시. GestureTrailWindow가 60Hz로 match를 호출하기 때문에
+    /// 매 호출마다 JSON 디코딩이 일어나면 비용이 누적된다. 변경 진입점은 setter / remove / resetAll
+    /// 셋뿐이며 모두 명시적으로 invalidate 한다.
+    private static var cached: [GestureDefinition]?
+
     static var all: [GestureDefinition] {
         get {
-            guard let data = UserDefaults.standard.data(forKey: key),
-                  let defs = try? JSONDecoder().decode([GestureDefinition].self, from: data) else {
-                return []
+            if let cached = cached { return cached }
+            let loaded: [GestureDefinition]
+            if let data = UserDefaults.standard.data(forKey: key),
+               let defs = try? JSONDecoder().decode([GestureDefinition].self, from: data) {
+                loaded = defs
+            } else {
+                loaded = []
             }
-            return defs
+            cached = loaded
+            return loaded
         }
         set {
+            cached = newValue
             if let data = try? JSONEncoder().encode(newValue) {
                 UserDefaults.standard.set(data, forKey: key)
             }
@@ -36,6 +47,7 @@ struct CustomGestureMappings {
     }
 
     static func resetAll() {
+        cached = nil
         UserDefaults.standard.removeObject(forKey: key)
     }
 }

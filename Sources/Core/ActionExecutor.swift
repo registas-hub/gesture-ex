@@ -3,8 +3,8 @@ import CoreGraphics
 
 struct ActionExecutor {
     /// GestureAction을 활성 앱에 전달한다.
-    /// 빌트인/사용자 단축키는 키스트로크, 마우스 액션은 휠/버튼 이벤트로 합성한다.
-    /// disabled 액션은 noop.
+    /// 빌트인 disabled / 빌트인 액션은 키스트로크, 사용자 단축키도 키스트로크,
+    /// 마우스 액션은 휠 또는 버튼 이벤트로 합성한다. keyCode가 nil인 disabled는 noop.
     static func execute(_ action: GestureAction) {
         switch action {
         case .builtin(let browserAction):
@@ -70,11 +70,8 @@ struct ActionExecutor {
     }
 
     /// 휠 버튼 클릭. 종료 좌표(현재 마우스 위치)에 down/up 한 쌍을 발사한다.
-    /// NSEvent.mouseLocation은 bottom-left 좌표라 CGEvent용 top-left로 변환한다.
     private static func postMiddleClick(source: CGEventSource?) {
-        let nsLoc = NSEvent.mouseLocation
-        let screenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let cgPoint = CGPoint(x: nsLoc.x, y: screenHeight - nsLoc.y)
+        let cgPoint = GestureRecognizer.nsPointToCG(NSEvent.mouseLocation)
 
         guard let down = CGEvent(mouseEventSource: source,
                                   mouseType: .otherMouseDown,

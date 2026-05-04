@@ -87,12 +87,7 @@ enum BrowserAction: String, CaseIterable, Codable {
     /// `disabled`는 키 발사가 없으므로 nil.
     var shortcutLabel: String? {
         guard let code = keyCode else { return nil }
-        var modifiers = ""
-        if flags.contains(.maskControl)   { modifiers += "⌃" }
-        if flags.contains(.maskAlternate) { modifiers += "⌥" }
-        if flags.contains(.maskShift)     { modifiers += "⇧" }
-        if flags.contains(.maskCommand)   { modifiers += "⌘" }
-        return modifiers + Self.keyDisplayName(for: code)
+        return flags.modifierSymbols + Self.keyDisplayName(for: code)
     }
 
     /// popup·메뉴 표시용 라벨 — 인간 친화적 이름 + 단축키.

@@ -20,13 +20,7 @@ struct KeyShortcut: Codable, Hashable {
 
     /// "⇧⌘A" 형태의 사용자 표시 문자열.
     var displayString: String {
-        var modifiers = ""
-        let f = cgFlags
-        if f.contains(.maskControl)   { modifiers += "⌃" }
-        if f.contains(.maskAlternate) { modifiers += "⌥" }
-        if f.contains(.maskShift)     { modifiers += "⇧" }
-        if f.contains(.maskCommand)   { modifiers += "⌘" }
-        return modifiers + displayKey
+        cgFlags.modifierSymbols + displayKey
     }
 
     /// NSEvent.keyDown으로부터 KeyShortcut을 만든다. modifier-only 입력은 nil.
@@ -89,5 +83,18 @@ struct KeyShortcut: Codable, Hashable {
         case 0x6F: return "F12"
         default: return nil
         }
+    }
+}
+
+extension CGEventFlags {
+    /// "⌃⌥⇧⌘" 순서의 macOS 표준 modifier 심볼.
+    /// 비어 있으면 빈 문자열.
+    var modifierSymbols: String {
+        var s = ""
+        if contains(.maskControl)   { s += "⌃" }
+        if contains(.maskAlternate) { s += "⌥" }
+        if contains(.maskShift)     { s += "⇧" }
+        if contains(.maskCommand)   { s += "⌘" }
+        return s
     }
 }

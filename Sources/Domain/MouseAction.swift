@@ -12,15 +12,6 @@ enum MouseScrollDirection: String, Codable, CaseIterable {
         }
     }
 
-    var arrow: String {
-        switch self {
-        case .up:    return "↑"
-        case .down:  return "↓"
-        case .left:  return "←"
-        case .right: return "→"
-        }
-    }
-
     /// 가로 스크롤(wheel2) 여부.
     var isHorizontal: Bool {
         self == .left || self == .right

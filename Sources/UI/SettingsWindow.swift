@@ -784,7 +784,7 @@ final class SettingsWindow: NSObject,
         let idx = sender.tag
         guard idx >= 0, idx < all.count else { return }
         CustomGestureMappings.remove(pattern: all[idx].pattern)
-        refreshCustomList()
+        NotificationCenter.default.post(name: .customGesturesChanged, object: nil)
     }
 
     // MARK: - Reset

@@ -8,6 +8,9 @@ private final class TrailView: NSView {
 
     private let labelBackground: NSView
     private let labelText: NSTextField
+    /// 60Hz tick에서 라벨 텍스트가 변하지 않는 동안 stringValue·setFrameOrigin 호출을 건너뛴다.
+    private var lastLabelText: String?
+    private var lastLabelOrigin: NSPoint?
 
     /// 마우스 우하단으로의 라벨 오프셋 (마우스 커서 가리지 않도록)
     private static let labelOffset = NSPoint(x: 18, y: -56)
@@ -69,6 +72,8 @@ private final class TrailView: NSView {
         lastPoint = start
         applyPath()
         labelBackground.isHidden = true
+        lastLabelText = nil
+        lastLabelOrigin = nil
     }
 
     func extend(to point: NSPoint) {
@@ -95,25 +100,31 @@ private final class TrailView: NSView {
 
         guard let text = text else {
             labelBackground.isHidden = true
+            lastLabelText = nil
+            lastLabelOrigin = nil
             return
         }
 
-        labelText.stringValue = text
+        if text != lastLabelText {
+            labelText.stringValue = text
+            lastLabelText = text
+        }
 
         // 마우스 위치 + 오프셋. 화면 가장자리에서는 자동 flip.
         var origin = NSPoint(
             x: mouseLocal.x + Self.labelOffset.x,
             y: mouseLocal.y + Self.labelOffset.y
         )
-        // 우측이 잘리면 마우스 왼쪽으로
         if origin.x + Self.labelSize.width > bounds.maxX {
             origin.x = mouseLocal.x - Self.labelSize.width - Self.labelOffset.x
         }
-        // 하단이 잘리면 마우스 위쪽으로
         if origin.y < bounds.minY {
             origin.y = mouseLocal.y + 24
         }
-        labelBackground.setFrameOrigin(origin)
+        if origin != lastLabelOrigin {
+            labelBackground.setFrameOrigin(origin)
+            lastLabelOrigin = origin
+        }
         labelBackground.isHidden = false
     }
 
