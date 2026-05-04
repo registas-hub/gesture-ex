@@ -212,8 +212,8 @@ gesture-ex/
 │   └── UI/                    # SettingsWindow, GestureTrailWindow, AddGestureController, ...
 ├── Info.plist                 # Bundle metadata
 ├── build.sh                   # swiftc + codesign + bundle
-├── create-release.sh          # build → zip → SHA256 → tag → GitHub Release
 ├── create-signing-cert.sh     # one-time cert setup
+├── export-signing-cert.sh     # one-time secret registration for the release workflow
 ├── README.md
 └── .gitignore
 ```
@@ -273,7 +273,7 @@ git push origin v0.3.0
 #    zips with ditto, computes SHA256, and publishes the GitHub Release with auto-generated notes.
 ```
 
-The legacy `create-release.sh` (build → tag → release in one shot from local machine) is kept for emergency use, but tag-push via Actions is the primary path.
+All releases go through the Actions workflow — there is no local-only release path.
 
 ## License
 
