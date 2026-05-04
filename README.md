@@ -250,6 +250,31 @@ Stable code-signing identity means the rebuilt binary has the same code-signing 
 
 Append the bundle ID to `BrowserDetector.chromiumBundles` or `webkitBundles` in `Sources/Core/BrowserDetector.swift`.
 
+### Releasing
+
+Releases are built and published by **GitHub Actions** on tag push (`.github/workflows/release.yml`).
+
+**One-time setup** — register the signing cert as a repo secret so CI builds match local `cdhash`:
+
+```bash
+./create-signing-cert.sh         # if you don't have RightClickOnUpDev yet
+./export-signing-cert.sh         # exports → base64 → registers SIGNING_CERT_P12_BASE64 + SIGNING_CERT_PASSWORD via gh CLI
+rm -f RightClickOnUpDev.p12 RightClickOnUpDev.p12.base64   # cleanup local artifacts
+```
+
+If `gh` is not logged in, the script prints manual instructions for **Settings → Secrets and variables → Actions**.
+
+**Cut a release**:
+
+```bash
+git tag -a v0.3.0 -m "Release v0.3.0"
+git push origin v0.3.0
+# → workflow runs on macos-14, signs with RightClickOnUpDev (or ad-hoc fallback if secrets missing),
+#    zips with ditto, computes SHA256, and publishes the GitHub Release with auto-generated notes.
+```
+
+The legacy `create-release.sh` (build → tag → release in one shot from local machine) is kept for emergency use, but tag-push via Actions is the primary path.
+
 ## License
 
 [MIT](./LICENSE) © Registas
