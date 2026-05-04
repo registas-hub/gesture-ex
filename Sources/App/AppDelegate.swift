@@ -427,19 +427,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showAbout() {
         // macOS 표준 About 패널 — 다른 앱과 일관된 룩(아이콘·이름·버전·copyright)을
         // 자동으로 채우고, credits만 우리가 주입한다.
-        let credits = NSAttributedString(
+        // toggle hotkey는 사용자가 Settings에서 바꿀 수 있으므로 정적 문자열이 아닌
+        // 현재 바인딩을 읽어 표시한다.
+        let toggleKey = HotkeyPreferences.binding.displayString
+        let baseAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let credits = NSMutableAttributedString(
             string: """
-            Right-click on mouse-up + browser mouse gestures
-            for Chromium and WebKit.
+            Right-click on mouse-up + custom mouse gestures
+            for Chromium and WebKit browsers.
 
-            ⌥⌘G  toggle on/off
-            ⇧⌘,  open Settings
+            Configure 4-direction and multi-segment gestures,
+            per-app filters, and import/export your full
+            configuration from Settings.
+
+            \(toggleKey)  Toggle right-click on mouse-up
+            ⇧⌘,  Open Settings
+
             """,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11),
-                .foregroundColor: NSColor.labelColor,
-            ]
+            attributes: baseAttrs
         )
+        let repoURL = URL(string: "https://github.com/registas-hub/gesture-ex")!
+        var linkAttrs = baseAttrs
+        linkAttrs[.link] = repoURL
+        credits.append(NSAttributedString(
+            string: "github.com/registas-hub/gesture-ex",
+            attributes: linkAttrs
+        ))
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             NSApplication.AboutPanelOptionKey.credits: credits,
