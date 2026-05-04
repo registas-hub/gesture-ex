@@ -10,7 +10,9 @@ final class HotkeyManager {
     private var handler: (() -> Void)?
 
     /// keyCode/modifiers는 Carbon의 kVK_ANSI_*, cmdKey/optionKey 등.
-    func register(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
+    /// - Returns: 등록 성공 여부. 다른 앱이 이미 같은 hotkey를 점유하고 있으면 false.
+    @discardableResult
+    func register(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) -> Bool {
         unregister()
         self.handler = action
 
@@ -42,7 +44,9 @@ final class HotkeyManager {
         )
         if status == noErr {
             self.hotKeyRef = ref
+            return true
         }
+        return false
     }
 
     func unregister() {

@@ -37,14 +37,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 후행 토스트는 모두 제거 — 모든 메시지(성공/실패/사유)는 라이브 오버레이에 표시한다.
         // GestureToast 클래스는 향후 다른 용도로 쓸 수 있어 보존.
 
-        // 글로벌 hotkey ⌥⌘G — 어디서나 mouse-up 변환 토글
-        HotkeyManager.shared.register(
-            keyCode: UInt32(kVK_ANSI_G),
-            modifiers: UInt32(cmdKey | optionKey)
-        ) { [weak self] in
-            self?.toggleEnabled()
-        }
-
         // 우클릭 down/up 시점에 화면 트레일 오버레이 표시 / 숨김
         EventTapController.shared.onRightDown = {
             GestureTrailWindow.shared.begin()
@@ -60,6 +52,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         buildStatusItem()
         applyState(showAlertOnFailure: false)
+
+        // 글로벌 hotkey — 사용자 설정값으로 등록. 변경 시 .toggleHotkeyChanged 알림으로 재등록.
+        // buildStatusItem 이후에 호출해 toggleItem이 살아 있는 상태에서 메뉴 keyEquivalent를 셋업한다.
+        applyToggleHotkey()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applyToggleHotkey),
+            name: .toggleHotkeyChanged,
+            object: nil
+        )
 
         // 첫 실행 시 권한이 하나라도 없으면 자동으로 안내한다.
         // 사용자가 메뉴를 열어 "ON (no permission)"을 발견하기 전에 능동적으로 알림.
@@ -159,14 +161,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // mouse-up 변환 토글 — 글로벌 hotkey ⌥⌘G로도 토글 가능.
+        // mouse-up 변환 토글 — 글로벌 hotkey로도 토글 가능. keyEquivalent는 사용자 설정 반영.
         toggleItem = NSMenuItem(
             title: "Enable right-click on mouse-up",
             action: #selector(toggleEnabled),
-            keyEquivalent: "g"
+            keyEquivalent: ""
         )
-        toggleItem.keyEquivalentModifierMask = [.command, .option]
         toggleItem.target = self
+        applyToggleHotkeyToMenu()
         menu.addItem(toggleItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -316,6 +318,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleEnabled() {
         EventTapController.shared.isEnabled.toggle()
         applyState(showAlertOnFailure: true)
+    }
+
+    /// HotkeyPreferences를 읽어 글로벌 hotkey를 (재)등록한다.
+    /// - 비활성화 상태면 등록하지 않고 기존 등록을 해제한다.
+    /// - modifier 없는 단축키는 시스템 전역에서 평범한 키 입력을 가로채므로 등록을 거부한다.
+    /// - 등록 결과는 `.toggleHotkeyRegistrationResult`로 발사 — SettingsWindow가 충돌 상태를 사용자에게 알린다.
+    @objc private func applyToggleHotkey() {
+        let binding = HotkeyPreferences.binding
+        let isEnabled = HotkeyPreferences.isEnabled
+
+        guard isEnabled, binding.hasModifier else {
+            HotkeyManager.shared.unregister()
+            applyToggleHotkeyToMenu()
+            return
+        }
+
+        let ok = HotkeyManager.shared.register(
+            keyCode: UInt32(binding.keyCode),
+            modifiers: binding.carbonModifiers
+        ) { [weak self] in
+            self?.toggleEnabled()
+        }
+        applyToggleHotkeyToMenu()
+        NotificationCenter.default.post(
+            name: .toggleHotkeyRegistrationResult,
+            object: nil,
+            userInfo: ["ok": ok]
+        )
+    }
+
+    /// 메뉴 아이템의 keyEquivalent를 현재 hotkey 바인딩에 맞춰 동기화.
+    /// keyEquivalent는 표시 신호일 뿐이며 실제 글로벌 발사는 HotkeyManager가 담당한다.
+    private func applyToggleHotkeyToMenu() {
+        guard let item = toggleItem else { return }
+        let binding = HotkeyPreferences.binding
+        let isEnabled = HotkeyPreferences.isEnabled
+
+        if !isEnabled || !binding.hasModifier {
+            item.keyEquivalent = ""
+            item.keyEquivalentModifierMask = []
+            return
+        }
+        item.keyEquivalentModifierMask = binding.cgFlags.nsEventModifierFlags
+        item.keyEquivalent = binding.menuKeyEquivalent
     }
 
     @objc private func toggleChromiumGestures() {
