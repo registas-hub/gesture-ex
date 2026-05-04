@@ -88,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self  // menuWillOpen 호출되도록
+        // isEnabled를 코드에서 명시적으로 제어한다. 기본 auto-validation은 target/action이
+        // 유효하면 disabled 설정을 다시 켜버려 mouse-up 종속 그레이아웃이 동작하지 않는다.
+        menu.autoenablesItems = false
 
         statusLabelItem = NSMenuItem(title: "—", action: nil, keyEquivalent: "")
         statusLabelItem.isEnabled = false
@@ -192,9 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         chromiumGesturesItem.state = EventTapController.shared.chromiumGesturesEnabled ? .on : .off
         webkitGesturesItem.state = EventTapController.shared.webkitGesturesEnabled ? .on : .off
 
-        // 브라우저 제스처 토글은 항상 클릭 가능하다. 켜면 mouse-up이 자동으로 함께 활성화된다.
-        chromiumGesturesItem.isEnabled = true
-        webkitGesturesItem.isEnabled = true
+        // 브라우저 제스처는 mouse-up이 켜져 있어야만 동작한다. master OFF면 클릭 자체를 막아
+        // 시각적으로(회색) 종속 관계를 드러낸다.
+        chromiumGesturesItem.isEnabled = enabled
+        webkitGesturesItem.isEnabled = enabled
+        gesturesSectionHeader.isEnabled = false
         customizeItem.isEnabled = true
 
         // 섹션 헤더 — mouse-up OFF 또는 권한 부족 상태를 명시해 inert 상태를 인지시킨다.
