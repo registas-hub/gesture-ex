@@ -87,10 +87,13 @@ The menu-bar icon (`cursorarrow.click`) reveals:
 Status: ON ✓
 Active: Google Chrome — Chromium ✓
 ─────────
-✓ Enable right-click on mouse-up   ⌘ E
-✓ Gestures: Chromium
-✓ Gestures: WebKit (Safari)
-  Customize Gestures…              ⇧ ⌘ ,
+  Browser Gestures
+✓   Chromium (Chrome / Edge / Brave / Arc / …)
+✓   WebKit (Safari / Safari TP / Orion)
+─────────
+✓ Enable right-click on mouse-up    ⌥ ⌘ G
+─────────
+  Open Config…                      ⇧ ⌘ ,
 ─────────
   Launch at login
 ─────────
@@ -98,6 +101,8 @@ Active: Google Chrome — Chromium ✓
   About
   Quit                              ⌘ Q
 ```
+
+Toggling **Chromium** or **WebKit** gestures ON automatically enables **Right-click on mouse-up** if it's currently OFF — gestures depend on it.
 
 The `Active:` line tells you whether the currently-frontmost app is recognized as a Chromium or WebKit browser, and whether its gestures are enabled — invaluable when something doesn't fire as expected.
 
@@ -114,10 +119,10 @@ The `Active:` line tells you whether the currently-frontmost app is recognized a
 
 ## Customize
 
-Open via `⇧⌘,` or menu → **Customize Gestures…**
+Open via `⇧⌘,` or menu → **Open Config…** — a sidebar window with four sections.
 
-### Mouse Gesture Mappings
-Pick an action for each cardinal direction.
+### Gesture Mappings
+Pick an action for each cardinal direction (←/→/↑/↓).
 
 ### Live Overlay
 - **Trail color** — system color picker
@@ -132,6 +137,11 @@ Pick an action for each cardinal direction.
 3. Pattern preview updates live (e.g. `←↑`)
 4. Pick an action
 5. **Save** — pattern is persisted in `UserDefaults` and recognized next time
+
+### App Filter
+Restrict the right-click-on-mouse-up conversion to specific apps.
+- **Mode** — All apps (default) / Only listed / Exclude listed
+- **Patterns** — one bundle ID per line (`com.google.Chrome`); prefix with `regex:` for regex (`regex:^com\.google\..*`); `#` lines are comments
 
 ## Architecture
 
@@ -193,9 +203,16 @@ Both are scoped to the binary path, persisted by the self-signed code-signing id
 
 ```
 gesture-ex/
-├── main.swift                 # ~2,200 LoC, single source file
+├── Sources/
+│   ├── main.swift             # entry point — NSApp boot
+│   ├── App/                   # AppDelegate, HotkeyManager
+│   ├── Core/                  # EventTapController, PathAnalyzer, ActionExecutor, BrowserDetector
+│   ├── Domain/                # GestureDirection, GesturePattern, BrowserAction, ...
+│   ├── Storage/               # GestureMappings, CustomGestureMappings, OverlayPreferences, AppFilter
+│   └── UI/                    # SettingsWindow, GestureTrailWindow, AddGestureController, ...
 ├── Info.plist                 # Bundle metadata
 ├── build.sh                   # swiftc + codesign + bundle
+├── create-release.sh          # build → zip → SHA256 → tag → GitHub Release
 ├── create-signing-cert.sh     # one-time cert setup
 ├── README.md
 └── .gitignore
@@ -204,7 +221,7 @@ gesture-ex/
 ### Iterate
 
 ```bash
-# After editing main.swift:
+# After editing any source file:
 pkill -f gesture-ex
 ./build.sh
 open gesture-ex.app
@@ -214,7 +231,7 @@ Stable code-signing identity means the rebuilt binary has the same code-signing 
 
 ### Notable design decisions
 
-- **Single source file** — current size (~2.2 K LoC) is still scrollable; split into modules when it crosses ~3 K.
+- **Modular `Sources/` tree** — split by responsibility (App / Core / Domain / Storage / UI) so each layer has a single reason to change. `build.sh` compiles the whole tree as one Swift module, no SwiftPM overhead.
 - **HID-level event tap** — session-level taps work for Finder but Chromium's renderer rejects synthesized events from session level. HID is necessary.
 - **Self-signed certificate over ad-hoc** — ad-hoc signing changes `cdhash` every build, forcing TCC re-authorization. A stable cert keeps the same TCC identity across rebuilds without enrolling in Apple Developer Program.
 - **`nonactivatingPanel` for overlays** — prevents the trail/label from stealing focus from the frontmost browser, which would otherwise route synthesized keystrokes back to `gesture-ex` itself.
@@ -223,7 +240,7 @@ Stable code-signing identity means the rebuilt binary has the same code-signing 
 
 ### Adding a new action
 
-1. Add a `case` to `BrowserAction` (`main.swift`)
+1. Add a `case` to `BrowserAction` (`Sources/Domain/BrowserAction.swift`)
 2. Provide `keyCode`, `flags`, `label` for the new case
 3. Rebuild — the new action automatically appears in:
    - 4-direction mapping `popup`s
@@ -231,7 +248,7 @@ Stable code-signing identity means the rebuilt binary has the same code-signing 
 
 ### Adding a new browser
 
-Append the bundle ID to `BrowserDetector.chromiumBundles` or `webkitBundles`.
+Append the bundle ID to `BrowserDetector.chromiumBundles` or `webkitBundles` in `Sources/Core/BrowserDetector.swift`.
 
 ## License
 

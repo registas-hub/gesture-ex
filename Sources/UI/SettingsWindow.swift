@@ -1,6 +1,38 @@
 import AppKit
 
-final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
+/// 설정 윈도우의 좌측 사이드바에 표시할 그룹.
+/// 새 카테고리를 추가하려면 case 추가 + buildPage(for:) 분기 + sidebar 셀 텍스트만 추가하면 된다.
+private enum SettingsSection: Int, CaseIterable {
+    case mappings
+    case overlay
+    case custom
+    case appFilter
+
+    var label: String {
+        switch self {
+        case .mappings:  return "Gesture Mappings"
+        case .overlay:   return "Live Overlay"
+        case .custom:    return "Custom Gestures"
+        case .appFilter: return "App Filter"
+        }
+    }
+
+    /// macOS SF Symbol 이름 (사이드바 아이콘용).
+    var symbolName: String {
+        switch self {
+        case .mappings:  return "arrow.up.and.down.and.arrow.left.and.right"
+        case .overlay:   return "paintbrush"
+        case .custom:    return "scribble"
+        case .appFilter: return "app.badge"
+        }
+    }
+}
+
+final class SettingsWindow: NSObject,
+                             NSWindowDelegate,
+                             NSTextViewDelegate,
+                             NSTableViewDataSource,
+                             NSTableViewDelegate {
     static let shared = SettingsWindow()
 
     private var window: NSWindow?
@@ -20,6 +52,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     // App Filter 컨트롤
     private weak var appFilterModePopup: NSPopUpButton?
     private weak var appFilterTextView: NSTextView?
+
+    // 사이드바/페이지 컨테이너
+    private weak var sidebarTable: NSTableView?
+    private weak var pagesTabView: NSTabView?
 
     /// Linger duration 드롭다운에 표시할 옵션
     private static let lingerOptions: [(label: String, value: Double)] = [
@@ -41,12 +77,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
     private func buildAndShow() {
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 880),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
-        w.title = "Customize Mouse Gestures"
+        w.title = "Config"
+        w.minSize = NSSize(width: 640, height: 520)
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.contentView = buildContent()
@@ -57,26 +94,192 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // MARK: - Top-level layout
+
+    /// Window content =  [ Split (sidebar | pages) ]  +  [ footer ]  세로 스택.
     private func buildContent() -> NSView {
-        let root = NSStackView()
-        root.orientation = .vertical
-        root.alignment = .leading
-        root.spacing = 16
-        root.edgeInsets = NSEdgeInsets(top: 22, left: 28, bottom: 22, right: 28)
-        root.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
 
-        // Header
-        let title = NSTextField(labelWithString: "Mouse Gesture Mappings")
-        title.font = .systemFont(ofSize: 15, weight: .semibold)
-        root.addArrangedSubview(title)
+        let split = buildSplitView()
+        let footer = buildFooter()
 
-        let desc = NSTextField(labelWithString:
-            "Drag with right-button held in a supported browser (Chromium / WebKit), then release.")
-        desc.font = .systemFont(ofSize: 11)
-        desc.textColor = .secondaryLabelColor
-        root.addArrangedSubview(desc)
+        container.addSubview(split)
+        container.addSubview(footer)
 
-        // 방향별 행 (NSGridView로 정렬: 화살표 / 라벨 / 드롭다운)
+        NSLayoutConstraint.activate([
+            split.topAnchor.constraint(equalTo: container.topAnchor),
+            split.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            split.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            split.bottomAnchor.constraint(equalTo: footer.topAnchor),
+
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+            footer.heightAnchor.constraint(equalToConstant: 32),
+        ])
+
+        return container
+    }
+
+    /// 좌측 사이드바(NSTableView) + 우측 NSTabView를 가진 horizontal split.
+    private func buildSplitView() -> NSSplitView {
+        let split = NSSplitView()
+        split.dividerStyle = .thin
+        split.isVertical = true
+        split.translatesAutoresizingMaskIntoConstraints = false
+
+        split.addArrangedSubview(buildSidebar())
+        split.addArrangedSubview(buildPagesTabView())
+        split.setHoldingPriority(.init(260), forSubviewAt: 0)
+        return split
+    }
+
+    /// SF Symbol + 라벨 셀로 구성된 source-list 스타일 NSTableView.
+    private func buildSidebar() -> NSView {
+        let table = NSTableView()
+        table.headerView = nil
+        if #available(macOS 11.0, *) {
+            table.style = .sourceList
+        } else {
+            table.selectionHighlightStyle = .sourceList
+        }
+        table.rowSizeStyle = .default
+        table.intercellSpacing = NSSize(width: 0, height: 4)
+        table.usesAutomaticRowHeights = false
+        table.rowHeight = 28
+        table.dataSource = self
+        table.delegate = self
+        table.allowsEmptySelection = false
+        table.allowsMultipleSelection = false
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("section"))
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        self.sidebarTable = table
+
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        scroll.widthAnchor.constraint(lessThanOrEqualToConstant: 240).isActive = true
+
+        // 사이드바 배경에 source-list 톤을 입혀 표준 macOS 룩과 가깝게 만든다.
+        let visualEffect = NSVisualEffectView()
+        visualEffect.material = .sidebar
+        visualEffect.blendingMode = .behindWindow
+        visualEffect.state = .followsWindowActiveState
+        visualEffect.translatesAutoresizingMaskIntoConstraints = false
+        visualEffect.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: visualEffect.topAnchor, constant: 8),
+            scroll.leadingAnchor.constraint(equalTo: visualEffect.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: visualEffect.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: visualEffect.bottomAnchor, constant: -8),
+        ])
+
+        // 첫 진입 시 첫 섹션 자동 선택
+        DispatchQueue.main.async {
+            table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+
+        return visualEffect
+    }
+
+    /// 4개 페이지를 가진 tabless NSTabView.
+    private func buildPagesTabView() -> NSView {
+        let tab = NSTabView()
+        tab.tabViewType = .noTabsNoBorder
+        tab.translatesAutoresizingMaskIntoConstraints = false
+
+        for section in SettingsSection.allCases {
+            let item = NSTabViewItem(identifier: section.rawValue)
+            item.label = section.label
+            item.view = buildPage(for: section)
+            tab.addTabViewItem(item)
+        }
+        self.pagesTabView = tab
+        return tab
+    }
+
+    private func buildFooter() -> NSStackView {
+        let footer = NSStackView()
+        footer.orientation = .horizontal
+        footer.spacing = 12
+        footer.alignment = .centerY
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        let resetButton = NSButton(
+            title: "Reset to Defaults",
+            target: self,
+            action: #selector(resetToDefaults)
+        )
+        footer.addArrangedSubview(resetButton)
+
+        let flexible = NSView()
+        flexible.translatesAutoresizingMaskIntoConstraints = false
+        flexible.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        footer.addArrangedSubview(flexible)
+
+        let closeButton = NSButton(
+            title: "Close",
+            target: self,
+            action: #selector(closeWindow)
+        )
+        closeButton.keyEquivalent = "\r"
+        footer.addArrangedSubview(closeButton)
+
+        return footer
+    }
+
+    // MARK: - Page builders
+
+    /// 단일 페이지 컨테이너. body(NSStackView)를 top-leading 정렬로 고정.
+    /// 모든 페이지 콘텐츠가 윈도우 minSize(640×520) 안에 들어가므로 NSScrollView 미사용.
+    private func buildPage(for section: SettingsSection) -> NSView {
+        let body: NSStackView
+        switch section {
+        case .mappings:  body = buildMappingsBody()
+        case .overlay:   body = buildOverlayBody()
+        case .custom:    body = buildCustomGesturesBody()
+        case .appFilter: body = buildAppFilterBody()
+        }
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(body)
+        NSLayoutConstraint.activate([
+            body.topAnchor.constraint(equalTo: container.topAnchor, constant: 22),
+            body.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
+            body.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+            body.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -16),
+        ])
+        return container
+    }
+
+    /// 모든 페이지가 공유하는 vertical stack + title + description prelude.
+    private func makePageStack(title: String, description: String) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(makeSectionTitle(title))
+        stack.addArrangedSubview(makeSectionDescription(description))
+        return stack
+    }
+
+    /// 4-direction gesture mapping 페이지.
+    private func buildMappingsBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Mouse Gesture Mappings",
+            description: "Drag with right-button held in a supported browser (Chromium / WebKit), then release."
+        )
+
         let grid = NSGridView()
         grid.rowSpacing = 10
         grid.columnSpacing = 14
@@ -97,56 +300,38 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             grid.addRow(with: [arrowLabel, nameLabel, popup])
         }
 
-        // 컬럼 폭 가이드
         if grid.numberOfColumns > 0 {
             grid.column(at: 0).width = 36
             grid.column(at: 1).width = 80
         }
 
-        root.addArrangedSubview(grid)
+        stack.addArrangedSubview(grid)
+        return stack
+    }
 
-        // ── Live Overlay 섹션 ──
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        root.addArrangedSubview(separator)
-        separator.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -56).isActive = true
+    /// Live Overlay 페이지.
+    private func buildOverlayBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Live Overlay",
+            description: "Customize the trail and action label that appear during the drag."
+        )
+        stack.addArrangedSubview(buildOverlayGrid())
+        return stack
+    }
 
-        let overlayTitle = NSTextField(labelWithString: "Live Overlay")
-        overlayTitle.font = .systemFont(ofSize: 15, weight: .semibold)
-        root.addArrangedSubview(overlayTitle)
-
-        let overlayDesc = NSTextField(labelWithString:
-            "Customize the trail and action label that appear during the drag.")
-        overlayDesc.font = .systemFont(ofSize: 11)
-        overlayDesc.textColor = .secondaryLabelColor
-        root.addArrangedSubview(overlayDesc)
-
-        root.addArrangedSubview(buildOverlayGrid())
-
-        // ── Custom Gestures 섹션 ──
-        let separator2 = NSBox()
-        separator2.boxType = .separator
-        separator2.translatesAutoresizingMaskIntoConstraints = false
-        root.addArrangedSubview(separator2)
-        separator2.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -56).isActive = true
-
-        let customTitle = NSTextField(labelWithString: "Custom Gestures")
-        customTitle.font = .systemFont(ofSize: 15, weight: .semibold)
-        root.addArrangedSubview(customTitle)
-
-        let customDesc = NSTextField(labelWithString:
-            "Multi-segment patterns drawn by you (e.g. ←↑, ↓→). Single directions use the table above.")
-        customDesc.font = .systemFont(ofSize: 11)
-        customDesc.textColor = .secondaryLabelColor
-        root.addArrangedSubview(customDesc)
+    /// Custom gestures 페이지.
+    private func buildCustomGesturesBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Custom Gestures",
+            description: "Multi-segment patterns drawn by you (e.g. ←↑, ↓→). Single directions use the Gesture Mappings tab."
+        )
 
         let addButton = NSButton(
             title: "+ Add Custom Gesture…",
             target: self,
             action: #selector(showAddGesture)
         )
-        root.addArrangedSubview(addButton)
+        stack.addArrangedSubview(addButton)
 
         let listStack = NSStackView()
         listStack.orientation = .vertical
@@ -154,34 +339,32 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         listStack.alignment = .leading
         listStack.translatesAutoresizingMaskIntoConstraints = false
         self.customListStack = listStack
-        root.addArrangedSubview(listStack)
+        stack.addArrangedSubview(listStack)
 
         refreshCustomList()
 
-        // Custom gesture 변경 알림 구독 — Add 모달이 저장하면 즉시 리스트 갱신
+        // Custom gesture 변경 알림 구독 — Add 모달이 저장하면 즉시 리스트 갱신.
+        // 윈도우가 매번 새로 생성되지 않으므로(공유 인스턴스) addObserver 중복 방지를 위해 먼저 제거.
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .customGesturesChanged,
+            object: nil
+        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(refreshCustomList),
             name: .customGesturesChanged,
             object: nil
         )
+        return stack
+    }
 
-        // ── Application Filter 섹션 ──
-        let separator3 = NSBox()
-        separator3.boxType = .separator
-        separator3.translatesAutoresizingMaskIntoConstraints = false
-        root.addArrangedSubview(separator3)
-        separator3.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -56).isActive = true
-
-        let filterTitle = NSTextField(labelWithString: "Application Filter")
-        filterTitle.font = .systemFont(ofSize: 15, weight: .semibold)
-        root.addArrangedSubview(filterTitle)
-
-        let filterDesc = NSTextField(labelWithString:
-            "Limit which apps the right-click on mouse-up conversion applies to.")
-        filterDesc.font = .systemFont(ofSize: 11)
-        filterDesc.textColor = .secondaryLabelColor
-        root.addArrangedSubview(filterDesc)
+    /// Application filter 페이지.
+    private func buildAppFilterBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Application Filter",
+            description: "Limit which apps the right-click on mouse-up conversion applies to."
+        )
 
         // Mode 드롭다운
         let modeRow = NSStackView()
@@ -206,24 +389,23 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         modePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
         self.appFilterModePopup = modePopup
         modeRow.addArrangedSubview(modePopup)
-        root.addArrangedSubview(modeRow)
+        stack.addArrangedSubview(modeRow)
 
-        // Patterns 텍스트 영역
         let patternsLabel = NSTextField(labelWithString:
             "Patterns (one per line; prefix with 'regex:' for regular expression):")
         patternsLabel.font = .systemFont(ofSize: 11)
         patternsLabel.textColor = .secondaryLabelColor
-        root.addArrangedSubview(patternsLabel)
+        stack.addArrangedSubview(patternsLabel)
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.heightAnchor.constraint(equalToConstant: 110).isActive = true
+        scrollView.heightAnchor.constraint(equalToConstant: 140).isActive = true
         scrollView.widthAnchor.constraint(equalToConstant: 460).isActive = true
         scrollView.hasVerticalScroller = true
         scrollView.borderType = .lineBorder
         scrollView.autohidesScrollers = true
 
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 110))
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 140))
         textView.string = AppFilter.patternsText
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -234,7 +416,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.delegate = self
-        textView.minSize = NSSize(width: 0, height: 110)
+        textView.minSize = NSSize(width: 0, height: 140)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                    height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -244,7 +426,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
         self.appFilterTextView = textView
-        root.addArrangedSubview(scrollView)
+        stack.addArrangedSubview(scrollView)
 
         let helpLabel = NSTextField(labelWithString: """
         Examples:
@@ -255,54 +437,25 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         """)
         helpLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         helpLabel.textColor = .tertiaryLabelColor
-        root.addArrangedSubview(helpLabel)
+        stack.addArrangedSubview(helpLabel)
 
-        // Footer (Reset / Close)
-        let footerSpacer = NSView()
-        footerSpacer.translatesAutoresizingMaskIntoConstraints = false
-        footerSpacer.heightAnchor.constraint(equalToConstant: 8).isActive = true
-        root.addArrangedSubview(footerSpacer)
+        return stack
+    }
 
-        let footer = NSStackView()
-        footer.orientation = .horizontal
-        footer.spacing = 12
-        footer.alignment = .centerY
+    // MARK: - Common UI helpers
 
-        let resetButton = NSButton(
-            title: "Reset to Defaults",
-            target: self,
-            action: #selector(resetToDefaults)
-        )
-        footer.addArrangedSubview(resetButton)
+    private func makeSectionTitle(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        return label
+    }
 
-        let flexible = NSView()
-        flexible.translatesAutoresizingMaskIntoConstraints = false
-        flexible.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        footer.addArrangedSubview(flexible)
-
-        let closeButton = NSButton(
-            title: "Close",
-            target: self,
-            action: #selector(closeWindow)
-        )
-        closeButton.keyEquivalent = "\r"
-        footer.addArrangedSubview(closeButton)
-
-        // footer 너비 제약 — root 폭에 맞춰 늘어나게
-        footer.translatesAutoresizingMaskIntoConstraints = false
-        root.addArrangedSubview(footer)
-
-        let container = NSView()
-        container.addSubview(root)
-        NSLayoutConstraint.activate([
-            root.topAnchor.constraint(equalTo: container.topAnchor),
-            root.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            root.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 0),
-            footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: 0),
-        ])
-        return container
+    private func makeSectionDescription(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.preferredMaxLayoutWidth = 460
+        return label
     }
 
     private func makePopup(for direction: GestureDirection) -> NSPopUpButton {
@@ -333,34 +486,22 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         GestureMappings.setAction(action, for: direction)
     }
 
-    // MARK: Live Overlay UI
+    // MARK: - Live Overlay grid
 
-    /// 4행 NSGridView: Trail color / Background color+opacity / Show label / Linger duration
+    /// 5행 NSGridView: Trail color / Background color / opacity / Show label / Linger duration
     private func buildOverlayGrid() -> NSView {
         let grid = NSGridView()
         grid.rowSpacing = 12
         grid.columnSpacing = 14
         grid.translatesAutoresizingMaskIntoConstraints = false
 
-        // 1) Trail color
-        let trailCW = NSColorWell()
-        trailCW.color = OverlayPreferences.trailColor
-        trailCW.target = self
-        trailCW.action = #selector(trailColorChanged(_:))
-        trailCW.translatesAutoresizingMaskIntoConstraints = false
-        trailCW.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        trailCW.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        let trailCW = makeColorWell(initial: OverlayPreferences.trailColor,
+                                     action: #selector(trailColorChanged(_:)))
         self.trailColorWell = trailCW
         grid.addRow(with: [makeFieldLabel("Trail color"), trailCW])
 
-        // 2) Background color
-        let bgCW = NSColorWell()
-        bgCW.color = OverlayPreferences.backgroundColor
-        bgCW.target = self
-        bgCW.action = #selector(backgroundColorChanged(_:))
-        bgCW.translatesAutoresizingMaskIntoConstraints = false
-        bgCW.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        bgCW.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        let bgCW = makeColorWell(initial: OverlayPreferences.backgroundColor,
+                                  action: #selector(backgroundColorChanged(_:)))
         self.backgroundColorWell = bgCW
         grid.addRow(with: [makeFieldLabel("Background color"), bgCW])
 
@@ -424,7 +565,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         if grid.numberOfColumns > 0 {
             grid.column(at: 0).width = 156
         }
-        // 라벨 컬럼 우측 정렬
         for row in 0..<grid.numberOfRows {
             grid.cell(atColumnIndex: 0, rowIndex: row).xPlacement = .trailing
         }
@@ -438,6 +578,17 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         label.textColor = .labelColor
         label.alignment = .right
         return label
+    }
+
+    private func makeColorWell(initial: NSColor, action: Selector) -> NSColorWell {
+        let cw = NSColorWell()
+        cw.color = initial
+        cw.target = self
+        cw.action = action
+        cw.translatesAutoresizingMaskIntoConstraints = false
+        cw.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        cw.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        return cw
     }
 
     @objc private func trailColorChanged(_ sender: NSColorWell) {
@@ -464,7 +615,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         OverlayPreferences.lingerDuration = Self.lingerOptions[idx].value
     }
 
-    // MARK: Custom Gestures UI
+    // MARK: - Custom Gestures handlers
 
     /// CustomGestureMappings.all을 읽어 리스트를 다시 그린다.
     @objc private func refreshCustomList() {
@@ -530,7 +681,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         refreshCustomList()
     }
 
-    // MARK: Reset
+    // MARK: - Reset
 
     @objc private func resetToDefaults() {
         GestureMappings.resetToDefaults()
@@ -562,7 +713,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         refreshCustomList()
     }
 
-    // MARK: App Filter handlers
+    // MARK: - App Filter handlers
 
     @objc private func appFilterModeChanged(_ sender: NSPopUpButton) {
         let idx = sender.indexOfSelectedItem
@@ -583,6 +734,57 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
     func windowWillClose(_ notification: Notification) {
         // 메뉴바 앱이라 .accessory 활성 정책 그대로 유지
+    }
+
+    // MARK: - NSTableViewDataSource / NSTableViewDelegate (sidebar)
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return SettingsSection.allCases.count
+    }
+
+    func tableView(_ tableView: NSTableView,
+                   viewFor tableColumn: NSTableColumn?,
+                   row: Int) -> NSView? {
+        let section = SettingsSection.allCases[row]
+        let cell = NSTableCellView()
+
+        let text = NSTextField(labelWithString: section.label)
+        text.font = .systemFont(ofSize: 13)
+        text.textColor = .labelColor
+        text.translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: section.symbolName,
+                             accessibilityDescription: section.label)
+        icon.imageScaling = .scaleProportionallyDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        cell.addSubview(icon)
+        cell.addSubview(text)
+        cell.imageView = icon
+        cell.textField = text
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 18),
+            icon.heightAnchor.constraint(equalToConstant: 18),
+
+            text.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let table = notification.object as? NSTableView,
+              table === sidebarTable,
+              let tab = pagesTabView else { return }
+        let row = table.selectedRow
+        guard row >= 0, row < SettingsSection.allCases.count else { return }
+        tab.selectTabViewItem(at: row)
     }
 }
 
