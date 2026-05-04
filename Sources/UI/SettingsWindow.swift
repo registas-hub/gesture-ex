@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox  // kVK_Escape
 
 /// 설정 윈도우의 좌측 사이드바에 표시할 그룹.
 /// 새 카테고리를 추가하려면 case 추가 + buildPage(for:) 분기 + sidebar 셀 텍스트만 추가하면 된다.
@@ -8,6 +9,7 @@ private enum SettingsSection: Int, CaseIterable {
     case gestureApps
     case browsers
     case appFilter
+    case shortcut
 
     var label: String {
         switch self {
@@ -16,6 +18,7 @@ private enum SettingsSection: Int, CaseIterable {
         case .gestureApps: return "Gesture Apps"
         case .browsers:    return "Browsers"
         case .appFilter:   return "Right-click Apps"
+        case .shortcut:    return "Shortcut"
         }
     }
 
@@ -27,6 +30,7 @@ private enum SettingsSection: Int, CaseIterable {
         case .gestureApps: return "app.badge.checkmark"
         case .browsers:    return "safari"
         case .appFilter:   return "app.badge"
+        case .shortcut:    return "command"
         }
     }
 }
@@ -47,6 +51,15 @@ final class SettingsWindow: NSObject,
 
     private var window: NSWindow?
     private var popups: [GestureDirection: NSPopUpButton] = [:]
+
+    // Shortcut 페이지 — Reset 시 갱신을 위해 보유.
+    private weak var shortcutEnableCheckbox: NSButton?
+    private weak var shortcutBindingLabel: NSTextField?
+    private weak var shortcutRecordButton: NSButton?
+    private weak var shortcutStatusLabel: NSTextField?
+
+    /// 글로벌 hotkey 녹화 모드 시 활성된 NSEvent monitor.
+    private var hotkeyKeyMonitor: Any?
 
     // Live Overlay 컨트롤 — reset 시 갱신을 위해 보유
     private weak var trailColorWell: NSColorWell?
@@ -267,6 +280,12 @@ final class SettingsWindow: NSObject,
 
     /// 단일 페이지 컨테이너. body(NSStackView)를 top-leading 정렬로 고정.
     /// 모든 페이지 콘텐츠가 윈도우 minSize(640×520) 안에 들어가므로 NSScrollView 미사용.
+    ///
+    /// container는 NSTabViewItem.view로 들어가는데, NSTabView는 자식 뷰를 autoresizing
+    /// mask로 사이즈맞춤하지 *autolayout 제약을 자동으로 만들어 주지 않는다.* 그래서
+    /// `translatesAutoresizingMaskIntoConstraints = false`인 채로 두면 container의 frame이
+    /// 미정 상태가 되어 안쪽 body가 (0,0) 근방으로 몰리며 모든 페이지의 컨트롤이 겹쳐 보인다.
+    /// 따라서 container는 autoresizing 기반으로 두고, body만 autolayout으로 container에 핀한다.
     private func buildPage(for section: SettingsSection) -> NSView {
         let body: NSStackView
         switch section {
@@ -275,10 +294,11 @@ final class SettingsWindow: NSObject,
         case .gestureApps: body = buildGestureAppsBody()
         case .browsers:    body = buildBrowsersBody()
         case .appFilter:   body = buildAppFilterBody()
+        case .shortcut:    body = buildShortcutBody()
         }
 
         let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
+        container.autoresizingMask = [.width, .height]
         container.addSubview(body)
         NSLayoutConstraint.activate([
             body.topAnchor.constraint(equalTo: container.topAnchor, constant: 22),
@@ -341,27 +361,43 @@ final class SettingsWindow: NSObject,
     }
 
     /// 페이지 안의 sub-section을 둘러싸는 카드 컨테이너.
-    /// 시스템 기본 NSBox(.primary)는 미묘한 테두리·배경을 그려 Common Region 신호를 만든다.
-    /// 카드 간 spacing은 부모 stack의 spacing에 의존(기본 14) — 그룹 간 간격이 그룹 내 간격(spacing 8)보다 크다.
+    /// 미묘한 테두리·배경으로 Common Region 신호를 만들어 그룹을 시각적으로 구분한다.
+    /// 카드 간 spacing은 부모 stack의 spacing에 의존(기본 14) — 그룹 간 간격이 그룹 내 간격보다 크다.
+    ///
+    /// 주의: 기존 구현은 NSBox(.primary) + box.contentView = NSStackView 패턴이었으나
+    /// 최근 macOS에서 NSBox가 autolayout view를 contentView로 받을 때 frame을 관리해 주지 않아
+    /// 안쪽 컨트롤이 페이지 좌상단(0,0)에 떨어져 헤더와 겹치는 문제가 발생한다 — autolayout
+    /// 기반 NSView로 직접 그린다.
     private func makeCard(title: String, content: NSView) -> NSView {
-        let box = NSBox()
-        box.boxType = .primary
-        box.title = title
-        box.titlePosition = .atTop
-        box.titleFont = .systemFont(ofSize: 13, weight: .semibold)
-        box.translatesAutoresizingMaskIntoConstraints = false
+        let card = NSView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.wantsLayer = true
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = NSColor.separatorColor.cgColor
+        card.layer?.cornerRadius = 6
 
-        let body = NSStackView()
-        body.orientation = .vertical
-        body.alignment = .leading
-        body.spacing = 8
-        body.translatesAutoresizingMaskIntoConstraints = false
-        body.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 12, right: 12)
-        body.addArrangedSubview(content)
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(titleLabel)
 
-        box.contentView = body
-        box.widthAnchor.constraint(greaterThanOrEqualToConstant: 480).isActive = true
-        return box
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(content)
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -12),
+
+            content.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -12),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+
+            card.widthAnchor.constraint(greaterThanOrEqualToConstant: 480),
+        ])
+        return card
     }
 
     /// Live Overlay 페이지.
@@ -435,6 +471,182 @@ final class SettingsWindow: NSObject,
         )
         appFilterControls = result.controls
         return result.view
+    }
+
+    /// 글로벌 hotkey 커스터마이징 페이지.
+    /// 기본값은 ⌥⌘G — 다른 앱과 충돌하면 사용자가 임의 키로 변경하거나 hotkey를 끌 수 있다.
+    private func buildShortcutBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Global Shortcut",
+            description:
+                "Customize the global hotkey that toggles right-click on mouse-up. " +
+                "If the default conflicts with another app, record a new combination or disable the shortcut entirely."
+        )
+
+        // Enable 체크박스
+        let enableCb = NSButton(
+            checkboxWithTitle: "Enable global shortcut",
+            target: self,
+            action: #selector(shortcutEnableChanged(_:))
+        )
+        enableCb.state = HotkeyPreferences.isEnabled ? .on : .off
+        self.shortcutEnableCheckbox = enableCb
+        stack.addArrangedSubview(enableCb)
+
+        // 현재 바인딩 + Record/Default 버튼
+        let bindingRow = NSStackView()
+        bindingRow.orientation = .horizontal
+        bindingRow.spacing = 12
+        bindingRow.alignment = .centerY
+        bindingRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let head = NSTextField(labelWithString: "Shortcut:")
+        head.font = .systemFont(ofSize: 13)
+        head.textColor = .secondaryLabelColor
+        bindingRow.addArrangedSubview(head)
+
+        let label = NSTextField(labelWithString: HotkeyPreferences.binding.displayString)
+        label.font = .systemFont(ofSize: 18, weight: .semibold)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        self.shortcutBindingLabel = label
+        bindingRow.addArrangedSubview(label)
+
+        let recordButton = NSButton(
+            title: "Record",
+            target: self,
+            action: #selector(shortcutRecordTapped)
+        )
+        self.shortcutRecordButton = recordButton
+        bindingRow.addArrangedSubview(recordButton)
+
+        let defaultButton = NSButton(
+            title: "Use Default (⌥⌘G)",
+            target: self,
+            action: #selector(shortcutUseDefaultTapped)
+        )
+        bindingRow.addArrangedSubview(defaultButton)
+
+        stack.addArrangedSubview(bindingRow)
+
+        // Status 라벨 — 등록 충돌/비활성 상태를 사용자에게 알린다.
+        let status = NSTextField(wrappingLabelWithString: " ")
+        status.font = .systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        status.preferredMaxLayoutWidth = 460
+        self.shortcutStatusLabel = status
+        stack.addArrangedSubview(status)
+
+        // SettingsWindow 싱글톤이고 buildShortcutBody는 build 시 1회만 호출되므로
+        // 옵저버 해제는 불필요.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshShortcutUI),
+            name: .toggleHotkeyChanged,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeyRegistrationResult(_:)),
+            name: .toggleHotkeyRegistrationResult,
+            object: nil
+        )
+
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshShortcutUI()
+        }
+
+        return stack
+    }
+
+    /// 등록 결과 알림 처리 — 다른 앱과 충돌해 실패하면 빨간 경고를 status 라벨에 표시.
+    @objc private func handleHotkeyRegistrationResult(_ note: Notification) {
+        guard hotkeyKeyMonitor == nil else { return }   // 녹화 중엔 라벨을 건드리지 않음
+        let ok = (note.userInfo?["ok"] as? Bool) ?? true
+        guard !ok else {
+            // 성공 시엔 refreshShortcutUI가 정상 메시지를 채운다.
+            return
+        }
+        shortcutStatusLabel?.stringValue =
+            "This shortcut is already in use by another app. Choose a different combination."
+        shortcutStatusLabel?.textColor = .systemRed
+    }
+
+    /// 현재 HotkeyPreferences를 읽어 페이지 컨트롤들을 동기화.
+    @objc private func refreshShortcutUI() {
+        let binding = HotkeyPreferences.binding
+        let enabled = HotkeyPreferences.isEnabled
+        shortcutEnableCheckbox?.state = enabled ? .on : .off
+        shortcutBindingLabel?.stringValue = binding.displayString
+        shortcutBindingLabel?.textColor = enabled ? .labelColor : .tertiaryLabelColor
+
+        // 녹화 진행 중이 아니면 status 메시지를 갱신.
+        if hotkeyKeyMonitor != nil { return }
+        if !enabled {
+            shortcutStatusLabel?.stringValue = "Shortcut is disabled. The menu bar toggle still works."
+            shortcutStatusLabel?.textColor = .secondaryLabelColor
+        } else {
+            shortcutStatusLabel?.stringValue = "Press Record and then your desired key combination. Esc cancels."
+            shortcutStatusLabel?.textColor = .secondaryLabelColor
+        }
+    }
+
+    @objc private func shortcutEnableChanged(_ sender: NSButton) {
+        HotkeyPreferences.isEnabled = (sender.state == .on)
+    }
+
+    @objc private func shortcutUseDefaultTapped() {
+        HotkeyPreferences.binding = HotkeyPreferences.defaultBinding
+    }
+
+    @objc private func shortcutRecordTapped() {
+        if hotkeyKeyMonitor != nil {
+            stopRecordingHotkey()
+        } else {
+            startRecordingHotkey()
+        }
+    }
+
+    private func startRecordingHotkey() {
+        removeHotkeyMonitor()
+
+        shortcutRecordButton?.title = "Press keys…"
+        shortcutBindingLabel?.stringValue = "…"
+        shortcutStatusLabel?.stringValue = "Press the new shortcut, or Esc to cancel."
+        shortcutStatusLabel?.textColor = .secondaryLabelColor
+
+        hotkeyKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            if event.keyCode == UInt16(kVK_Escape)
+                && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                self.stopRecordingHotkey()
+                return nil
+            }
+            guard let shortcut = KeyShortcut.from(event: event) else { return nil }
+            // modifier-less 단축키는 거부 — 글로벌 등록 시 시스템 전역 키 입력을 가로채
+            // 사용자가 자기 발등을 찍는다. 녹화는 계속해 사용자가 수정 키를 추가할 기회를 준다.
+            guard shortcut.hasModifier else {
+                self.shortcutBindingLabel?.stringValue = shortcut.displayString
+                self.shortcutStatusLabel?.stringValue =
+                    "A shortcut must include at least one modifier (⌘ ⌥ ⌃ ⇧). Press again with a modifier."
+                self.shortcutStatusLabel?.textColor = .systemOrange
+                return nil
+            }
+            self.stopRecordingHotkey()
+            HotkeyPreferences.binding = shortcut
+            return nil
+        }
+    }
+
+    private func stopRecordingHotkey() {
+        removeHotkeyMonitor()
+        shortcutRecordButton?.title = "Record"
+        refreshShortcutUI()
+    }
+
+    private func removeHotkeyMonitor() {
+        guard let monitor = hotkeyKeyMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        hotkeyKeyMonitor = nil
     }
 
     /// 마우스 제스처 인식의 적용 대상 앱 설정 페이지.
@@ -946,7 +1158,7 @@ final class SettingsWindow: NSObject,
         let alert = NSAlert()
         alert.messageText = "Reset all settings to defaults?"
         alert.informativeText = """
-        This will erase your custom gestures, gesture mappings, overlay colors, app filters, and browser toggles. This cannot be undone.
+        This will erase your custom gestures, gesture mappings, overlay colors, app filters, browser toggles, and global shortcut. This cannot be undone.
         """
         alert.alertStyle = .warning
         let resetBtn = alert.addButton(withTitle: "Reset")
@@ -972,6 +1184,7 @@ final class SettingsWindow: NSObject,
         AppFilter.resetToDefaults()
         GestureAppFilter.resetToDefaults()
         BrowserPreferences.resetToDefaults()
+        HotkeyPreferences.resetToDefaults()
         // 매핑 popup 갱신
         for (direction, popup) in popups {
             BrowserActionPopup.select(GestureMappings.action(for: direction), in: popup)
@@ -1090,7 +1303,8 @@ final class SettingsWindow: NSObject,
     }
 
     func windowWillClose(_ notification: Notification) {
-        // 메뉴바 앱이라 .accessory 활성 정책 그대로 유지
+        // 녹화 중 닫혔을 때 NSEvent monitor가 영구히 살아 다음 녹화를 깨뜨리는 누수 방지.
+        stopRecordingHotkey()
     }
 
     // MARK: - NSTableViewDataSource / NSTableViewDelegate (sidebar)

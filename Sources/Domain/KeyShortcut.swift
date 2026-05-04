@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import Carbon.HIToolbox  // cmdKey / shiftKey / optionKey / controlKey
 
 /// 사용자가 직접 녹화한 키보드 단축키.
 /// 재발사에 필요한 keyCode/flags 외에 표시용 displayKey 문자도 함께 저장한다.
@@ -96,5 +97,47 @@ extension CGEventFlags {
         if contains(.maskShift)     { s += "⇧" }
         if contains(.maskCommand)   { s += "⌘" }
         return s
+    }
+
+    /// Carbon `RegisterEventHotKey`가 요구하는 modifier 비트마스크.
+    /// CGEventFlags(macOS native)와 Carbon 상수는 별개라 변환이 필요하다.
+    var carbonModifiers: UInt32 {
+        var m: UInt32 = 0
+        if contains(.maskCommand)   { m |= UInt32(cmdKey) }
+        if contains(.maskShift)     { m |= UInt32(shiftKey) }
+        if contains(.maskAlternate) { m |= UInt32(optionKey) }
+        if contains(.maskControl)   { m |= UInt32(controlKey) }
+        return m
+    }
+}
+
+extension KeyShortcut {
+    /// Carbon hotkey 등록용 modifier 비트마스크.
+    var carbonModifiers: UInt32 { cgFlags.carbonModifiers }
+
+    /// 글로벌 hotkey로 사용 가능한지 — modifier가 하나라도 있어야 한다.
+    /// modifier 없는 단일 키를 글로벌 등록하면 시스템 전역에서 해당 키가 가로채져
+    /// 사용자가 자기 발등을 찍는다(예: 'a' 키 입력 불가).
+    var hasModifier: Bool { carbonModifiers != 0 }
+
+    /// NSMenuItem.keyEquivalent에 안전하게 넣을 수 있는 1글자(소문자 ASCII) 또는 빈 문자열.
+    /// macOS 메뉴는 lowercase 단일 ASCII가 표준이며, 그 외 키는 modifier만 표시한다.
+    var menuKeyEquivalent: String {
+        guard displayKey.count == 1,
+              let scalar = displayKey.unicodeScalars.first,
+              scalar.isASCII else { return "" }
+        return displayKey.lowercased()
+    }
+}
+
+extension CGEventFlags {
+    /// CGEventFlags → NSEvent.ModifierFlags(메뉴 표시용).
+    var nsEventModifierFlags: NSEvent.ModifierFlags {
+        var mask: NSEvent.ModifierFlags = []
+        if contains(.maskCommand)   { mask.insert(.command) }
+        if contains(.maskShift)     { mask.insert(.shift) }
+        if contains(.maskAlternate) { mask.insert(.option) }
+        if contains(.maskControl)   { mask.insert(.control) }
+        return mask
     }
 }
