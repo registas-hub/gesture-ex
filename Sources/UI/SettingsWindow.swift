@@ -5,14 +5,12 @@ import AppKit
 private enum SettingsSection: Int, CaseIterable {
     case mappings
     case overlay
-    case custom
     case appFilter
 
     var label: String {
         switch self {
         case .mappings:  return "Gesture Mappings"
         case .overlay:   return "Live Overlay"
-        case .custom:    return "Custom Gestures"
         case .appFilter: return "App Filter"
         }
     }
@@ -22,7 +20,6 @@ private enum SettingsSection: Int, CaseIterable {
         switch self {
         case .mappings:  return "arrow.up.and.down.and.arrow.left.and.right"
         case .overlay:   return "paintbrush"
-        case .custom:    return "scribble"
         case .appFilter: return "app.badge"
         }
     }
@@ -245,7 +242,6 @@ final class SettingsWindow: NSObject,
         switch section {
         case .mappings:  body = buildMappingsBody()
         case .overlay:   body = buildOverlayBody()
-        case .custom:    body = buildCustomGesturesBody()
         case .appFilter: body = buildAppFilterBody()
         }
 
@@ -273,7 +269,7 @@ final class SettingsWindow: NSObject,
         return stack
     }
 
-    /// 4-direction gesture mapping 페이지.
+    /// 4-direction gesture mapping + custom gestures를 함께 보여주는 페이지.
     private func buildMappingsBody() -> NSStackView {
         let stack = makePageStack(
             title: "Mouse Gesture Mappings",
@@ -306,6 +302,14 @@ final class SettingsWindow: NSObject,
         }
 
         stack.addArrangedSubview(grid)
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.widthAnchor.constraint(greaterThanOrEqualToConstant: 460).isActive = true
+        stack.addArrangedSubview(divider)
+
+        appendCustomGesturesSection(to: stack)
         return stack
     }
 
@@ -319,12 +323,18 @@ final class SettingsWindow: NSObject,
         return stack
     }
 
-    /// Custom gestures 페이지.
-    private func buildCustomGesturesBody() -> NSStackView {
-        let stack = makePageStack(
-            title: "Custom Gestures",
-            description: "Multi-segment patterns drawn by you (e.g. ←↑, ↓→). Single directions use the Gesture Mappings tab."
-        )
+    /// Mappings 페이지 하단에 붙는 Custom Gestures sub-section.
+    private func appendCustomGesturesSection(to stack: NSStackView) {
+        let title = NSTextField(labelWithString: "Custom Gestures")
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        stack.addArrangedSubview(title)
+
+        let desc = NSTextField(wrappingLabelWithString:
+            "Multi-segment patterns drawn by you (e.g. ←↑, ↓→).")
+        desc.font = .systemFont(ofSize: 11)
+        desc.textColor = .secondaryLabelColor
+        desc.preferredMaxLayoutWidth = 460
+        stack.addArrangedSubview(desc)
 
         let addButton = NSButton(
             title: "+ Add Custom Gesture…",
@@ -356,7 +366,6 @@ final class SettingsWindow: NSObject,
             name: .customGesturesChanged,
             object: nil
         )
-        return stack
     }
 
     /// Application filter 페이지.
@@ -391,11 +400,26 @@ final class SettingsWindow: NSObject,
         modeRow.addArrangedSubview(modePopup)
         stack.addArrangedSubview(modeRow)
 
+        let patternsRow = NSStackView()
+        patternsRow.orientation = .horizontal
+        patternsRow.alignment = .centerY
+        patternsRow.spacing = 8
+
         let patternsLabel = NSTextField(labelWithString:
             "Patterns (one per line; prefix with 'regex:' for regular expression):")
         patternsLabel.font = .systemFont(ofSize: 11)
         patternsLabel.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(patternsLabel)
+        patternsRow.addArrangedSubview(patternsLabel)
+
+        let chooseAppButton = NSButton(
+            title: "Choose App…",
+            target: self,
+            action: #selector(chooseAppForFilter)
+        )
+        chooseAppButton.bezelStyle = .roundRect
+        chooseAppButton.controlSize = .small
+        patternsRow.addArrangedSubview(chooseAppButton)
+        stack.addArrangedSubview(patternsRow)
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -719,6 +743,44 @@ final class SettingsWindow: NSObject,
         let idx = sender.indexOfSelectedItem
         guard idx >= 0, idx < AppFilterMode.allCases.count else { return }
         AppFilter.mode = AppFilterMode.allCases[idx]
+    }
+
+    /// NSOpenPanel로 .app 번들을 선택받아 bundle ID를 패턴 목록에 추가한다.
+    @objc private func chooseAppForFilter() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Application"
+        panel.prompt = "Add"
+        panel.allowedFileTypes = ["app"]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.treatsFilePackagesAsDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let bundleID = Bundle(url: url)?.bundleIdentifier, !bundleID.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "Could not read bundle identifier"
+            alert.informativeText =
+                "The selected file does not appear to be a valid application bundle."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+        appendFilterPattern(bundleID)
+    }
+
+    /// 패턴 텍스트 끝에 한 줄 추가. 동일 패턴이 이미 있으면 추가하지 않는다.
+    private func appendFilterPattern(_ pattern: String) {
+        var text = AppFilter.patternsText
+        let alreadyExists = text
+            .split(whereSeparator: \.isNewline)
+            .contains { $0.trimmingCharacters(in: .whitespaces) == pattern }
+        if alreadyExists { return }
+        if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
+        text += pattern + "\n"
+        AppFilter.patternsText = text
+        appFilterTextView?.string = text
     }
 
     /// NSTextViewDelegate — 패턴 텍스트가 변경될 때마다 즉시 영속화.
