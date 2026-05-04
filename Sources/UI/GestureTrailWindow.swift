@@ -254,7 +254,7 @@ final class GestureTrailWindow {
     /// - 짧은 드래그 (< 20px) → nil (메시지 노이즈 방지)
     /// - Gesture Apps 필터로 차단된 앱 → nil (사용자가 명시적으로 제스처를 끈 영역)
     /// - 화이트리스트 IN: 엔진 체크 건너뛰고 패턴 분석으로 진행
-    /// - 비-브라우저 + 화이트리스트 X → "✗ Not browser: <앱명>"
+    /// - 비-브라우저 + 화이트리스트 X → "✗ Gestures unavailable: <앱명>"
     /// - 패턴 인식 실패 (사선 등) → "✗ Ambiguous"
     /// - 패턴 인식 + 매핑 없음 → "<패턴>  (no mapping)"
     /// - 패턴 인식 + 매핑 disabled → "<패턴>  (disabled)"
@@ -282,7 +282,7 @@ final class GestureTrailWindow {
         let explicitlyAllowed = GestureAppFilter.isExplicitlyAllowed(bundleID: bundleID)
         if !explicitlyAllowed && !EventTapController.shared.gesturesEnabledForFrontmost {
             let name = app?.localizedName ?? "app"
-            return "✗ Not browser: \(name)"
+            return "✗ Gestures unavailable: \(name)"
         }
 
         // 패턴 분석 — 실패 시 (사선·모호) 라벨로 사유 표시
