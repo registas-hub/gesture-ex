@@ -35,7 +35,7 @@ jobs:
       contents: write   # release create / asset upload
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve version label
         id: ver
@@ -50,7 +50,7 @@ jobs:
         if: ${{ env.HAS_CERT == 'true' }}
         env:
           HAS_CERT: ${{ secrets.SIGNING_CERT_P12_BASE64 != '' }}
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.SIGNING_CERT_PASSWORD }}
@@ -80,7 +80,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact (always — useful in dry-run too)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.zip }}
           path: ${{ steps.package.outputs.zip }}
@@ -88,7 +88,7 @@ jobs:
 
       - name: Create GitHub Release
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ steps.package.outputs.zip }}
           generate_release_notes: true
