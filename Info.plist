@@ -5,6 +5,9 @@
     <key>CFBundleExecutable</key>
     <string>gesture-ex</string>
 
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
     <key>CFBundleIdentifier</key>
     <string>com.registas.gesture-ex</string>
 

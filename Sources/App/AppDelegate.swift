@@ -72,11 +72,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func setupAppIcon() {
+        // 번들에 .icns가 있으면 그걸 사용 — About 다이얼로그가 Finder 아이콘과 같은 모양이 된다.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+            return
+        }
+
+        // 폴백: SF Symbol
         guard let symbol = NSImage(
             systemSymbolName: "cursorarrow.click.2",
             accessibilityDescription: "right-click on up"
         ) else { return }
-
         let config = NSImage.SymbolConfiguration(pointSize: 128, weight: .regular)
         let icon = symbol.withSymbolConfiguration(config) ?? symbol
         icon.isTemplate = false
