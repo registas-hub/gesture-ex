@@ -4,6 +4,8 @@
 
 ![social preview](docs/social-preview.png)
 
+<img width="720" height="441" alt="image" src="https://github.com/user-attachments/assets/1c96da75-e026-4881-9ca5-8dbb5f335d80" />
+
 ## Why
 
 On Windows / Linux, right-click triggers the context menu when the button is **released** — so you can press → drag → preview → release. macOS triggers on press, which forces you to commit before seeing the context and breaks gesture extensions (CrxMouse, Smartup, Gesturefy). `gesture-ex` shifts the trigger to mouse-up at the HID layer and adds native mouse gestures that don't rely on any browser extension.
