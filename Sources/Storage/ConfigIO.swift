@@ -202,8 +202,6 @@ struct ConfigIO {
 
         if let customs = snap.customGestures {
             CustomGestureMappings.all = customs
-            // CustomGestureMappings setter는 알림을 발사하지 않으므로 직접 보낸다 — Settings 리스트가 즉시 갱신된다.
-            NotificationCenter.default.post(name: .customGesturesChanged, object: nil)
         }
 
         if let o = snap.overlay {
