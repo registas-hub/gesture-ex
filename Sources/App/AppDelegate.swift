@@ -332,14 +332,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "gesture-ex"
         alert.informativeText = """
-        macOS 우클릭을 마우스 떼는 시점(mouse-up)에 발사하도록 변환합니다.
+        Right-click on mouse-up + browser mouse gestures
+        for Chromium and WebKit.
 
-        Chromium 계열(Chrome / Edge / Brave / Arc / Whale / Vivaldi / Opera 등) 및
-        WebKit 계열(Safari / Safari TP / Orion) 브라우저에서 4방향 + 사용자 정의 다중 segment
-        마우스 제스처를 지원합니다. 매핑은 Open Config…(⇧⌘,)에서 변경 가능.
-
-        Global hotkey: ⌥⌘G — anywhere to toggle on/off
-        HID 이벤트 탭 사용. 필요 권한: Accessibility + Input Monitoring.
+        ⌥⌘G  toggle on/off
+        ⇧⌘,  open Settings
         """
         alert.runModal()
     }
