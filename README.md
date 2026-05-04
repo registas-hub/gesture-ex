@@ -102,7 +102,7 @@ Active: Google Chrome — Chromium ✓
   Quit                              ⌘ Q
 ```
 
-Toggling **Chromium** or **WebKit** gestures ON automatically enables **Right-click on mouse-up** if it's currently OFF — gestures depend on it.
+Browser gestures depend on **Right-click on mouse-up** — when the master toggle is OFF, the Chromium and WebKit rows are grayed out (clickable only when the master is ON). When the master is ON but accessibility permission is missing, the section header reads `Browser Gestures (no permission)`.
 
 The `Active:` line tells you whether the currently-frontmost app is recognized as a Chromium or WebKit browser, and whether its gestures are enabled — invaluable when something doesn't fire as expected.
 
@@ -210,7 +210,11 @@ gesture-ex/
 │   ├── Domain/                # GestureDirection, GesturePattern, BrowserAction, ...
 │   ├── Storage/               # GestureMappings, CustomGestureMappings, OverlayPreferences, AppFilter
 │   └── UI/                    # SettingsWindow, GestureTrailWindow, AddGestureController, ...
-├── Info.plist                 # Bundle metadata
+├── Resources/
+│   └── AppIcon.icns           # bundle icon — copied into the .app at build time
+├── scripts/
+│   └── generate-icon.sh       # one-shot regenerator for AppIcon.icns
+├── Info.plist                 # Bundle metadata (CFBundleIconFile = AppIcon)
 ├── build.sh                   # swiftc + codesign + bundle
 ├── create-signing-cert.sh     # one-time cert setup
 ├── export-signing-cert.sh     # one-time secret registration for the release workflow
@@ -249,6 +253,15 @@ Stable code-signing identity means the rebuilt binary has the same code-signing 
 ### Adding a new browser
 
 Append the bundle ID to `BrowserDetector.chromiumBundles` or `webkitBundles` in `Sources/Core/BrowserDetector.swift`.
+
+### Regenerating the app icon
+
+```bash
+./scripts/generate-icon.sh   # rewrites Resources/AppIcon.icns
+./build.sh                   # picks up the new icon
+```
+
+`scripts/generate-icon.sh` compiles a tiny inline Swift renderer that draws a Big Sur squircle background with the SF Symbol `cursorarrow.click.2` on top, emits all 10 standard `iconset` sizes, and packs them with `iconutil`. Edit colors, symbol, or weights inside the script and rerun.
 
 ### Releasing
 
