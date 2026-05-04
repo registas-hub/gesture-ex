@@ -92,7 +92,7 @@ Choose which apps fire mouse gestures. The mode dropdown decides how the engine 
 | Mode | Behavior |
 |---|---|
 | **All apps** (default) | Gestures run only in supported browsers (engine check active). Pattern list ignored. Same as the original behavior before Gesture Apps shipped. |
-| **Whitelist (Only listed)** | Gestures run **only** in the listed apps — engine check is **bypassed**. Non-browser apps you add will fire gestures too. |
+| **Whitelist (Only listed)** | Gestures run in supported browsers (auto-included — you don't need to list Chrome/Safari/etc. yourself) **plus** the apps you list. The engine check is bypassed for listed apps, so non-browser apps like Warp or your IDE can be added and they will fire gestures too. |
 | **Blacklist (Exclude listed)** | Gestures run in every supported browser except the listed ones. Engine check still applies for non-listed apps. |
 
 - **Patterns** — same syntax as Mouse-up Apps (one bundle ID per line, `regex:` prefix, `#` comments)

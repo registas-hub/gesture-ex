@@ -27,17 +27,25 @@ struct GestureAppFilter {
     static func shouldApply(to bundleID: String?) -> Bool {
         switch mode {
         case .all:       return true
-        case .whitelist: return matches(bundleID)
+        case .whitelist: return matches(bundleID) || isKnownBrowser(bundleID)
         case .blacklist: return !matches(bundleID)
         }
     }
 
     /// 사용자가 명시적으로 화이트리스트에 등록한 앱인지.
     /// 옵션 A의 핵심: 이 앱은 브라우저 엔진 체크를 우회하고 제스처를 발사한다.
-    /// `whitelist` 모드 + 패턴 일치 조합에서만 true. 그 외 모드는 항상 false.
+    /// `whitelist` 모드 + 패턴 일치 조합에서만 true.
+    /// 자동 포함되는 지원 브라우저는 어차피 엔진 체크를 통과하므로 여기선 false 유지.
     static func isExplicitlyAllowed(bundleID: String?) -> Bool {
         guard mode == .whitelist else { return false }
         return matches(bundleID)
+    }
+
+    /// 화이트리스트 모드에서도 BrowserDetector가 인식하는 지원 브라우저는 패턴 등록 없이
+    /// 자동 포함되도록 한다. 사용자가 비-브라우저만 명시 등록하면 모든 의도가 커버된다.
+    private static func isKnownBrowser(_ bundleID: String?) -> Bool {
+        guard let id = bundleID, !id.isEmpty else { return false }
+        return BrowserDetector.bundles.contains(id)
     }
 
     private static func matches(_ bundleID: String?) -> Bool {

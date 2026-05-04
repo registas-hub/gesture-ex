@@ -403,7 +403,7 @@ final class SettingsWindow: NSObject,
             description: """
             Choose which apps fire mouse gestures. \
             All apps mode (default): gestures run in every supported browser only. \
-            Whitelist: gestures run ONLY in the listed apps — non-browsers included, engine check is bypassed. \
+            Whitelist: gestures run in supported browsers (auto-included) PLUS the apps you list — for the listed apps the engine check is bypassed, so non-browsers like Warp can be added. \
             Blacklist: gestures run in every supported browser except the listed ones. \
             Note: in non-browser apps the gesture actions still fire keyboard shortcuts (⌘[, ⌘R, …) which may have different meanings.
             """,
