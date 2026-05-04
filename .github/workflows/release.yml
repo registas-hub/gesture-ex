@@ -1,0 +1,66 @@
+# Tag push (vX.Y.Z) 시 자동으로 build → zip → SHA256 → GitHub Release 생성.
+# 로컬 create-release.sh의 [1/5]~[4/5] 단계를 대체한다.
+#
+# 필요한 secrets (Settings → Secrets and variables → Actions):
+#   SIGNING_CERT_P12_BASE64   ./export-signing-cert.sh로 추출한 base64 cert
+#   SIGNING_CERT_PASSWORD     export 시 입력한 .p12 password
+# secrets 미등록 시 cert import가 실패하므로 build는 ad-hoc 서명으로 fallback된다.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    # 'macos-latest' (=26)는 2026.04 이후 manual codesigning issue가 있어 안정 LTS로 핀.
+    # actions/runner-images#13884 참고.
+    runs-on: macos-14
+    permissions:
+      contents: write   # release create / asset upload
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import signing certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.SIGNING_CERT_PASSWORD }}
+
+      - name: Build app bundle
+        env:
+          SIGNING_IDENTITY: RightClickOnUpDev
+        run: ./build.sh
+
+      - name: Package zip + SHA256
+        id: package
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ZIP="gesture-ex-${VERSION}.zip"
+          ditto -c -k --keepParent gesture-ex.app "$ZIP"
+          SHA=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+          SIZE=$(du -h "$ZIP" | awk '{print $1}')
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "version_no_v=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.zip }}
+          generate_release_notes: true
+          body: |
+            **Asset**: `${{ steps.package.outputs.zip }}` (${{ steps.package.outputs.size }})
+            **SHA256**: `${{ steps.package.outputs.sha256 }}`
+
+            ### Cask metadata
+            ```
+            version:  ${{ steps.package.outputs.version_no_v }}
+            url:      https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ steps.package.outputs.zip }}
+            sha256:   ${{ steps.package.outputs.sha256 }}
+            ```
+
+            ---
