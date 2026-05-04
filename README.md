@@ -14,7 +14,7 @@ On Windows / Linux, right-click triggers the context menu when the button is **r
 
 - **Right-click on mouse-up** — context menu fires on release, so you can drag-preview-cancel.
 - **4-direction mouse gestures** — Back / Forward / Scroll-to-Top / Scroll-to-Bottom out of the box, fully remappable across 13 actions.
-- **User-drawn custom gestures** — multi-segment patterns like `←↑`, `↓→`, recognized by direction-change detection. Each pattern fires a built-in action, a user-recorded **keyboard shortcut** (e.g. `⇧⌘A`, `⌥F5`), or a **mouse action** (scroll up/down/left/right by N lines, middle-click).
+- **User-drawn custom gestures** — multi-segment patterns like `←↑`, `↓→`, recognized by direction-change detection. Each pattern fires a built-in action, a user-recorded **keyboard shortcut** (e.g. `⇧⌘A`, `⌥F5`), or a **mouse action** (scroll up/down/left/right by N lines, middle-click). Add, **edit**, and remove entries from the Settings list.
 - **Live trail overlay** — smooth blue trail with a label showing the action that will fire on release.
 - **Per-engine toggles** — enable independently for Chromium and WebKit families.
 - **Adaptive fallback** — short clicks, non-browser apps, and ambiguous drags pass through to the normal context menu (or silently cancel).

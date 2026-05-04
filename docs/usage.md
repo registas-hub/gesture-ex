@@ -81,6 +81,8 @@ Pick an action for each cardinal direction (←/→/↑/↓). Each popup item sh
 
 Custom Shortcut entries are listed as `Custom: ⇧⌘A`, mouse actions as `Scroll Down ×3` / `Middle Click`, so you can tell them apart from built-in actions at a glance. When a gesture matches, `ActionExecutor` synthesizes the corresponding HID-level event — keystroke, wheel scroll, or mouse button — so the frontmost app receives it as if you actually performed the input.
 
+Each row in the list has **Edit** and **Remove** buttons. Edit reopens the same modal in *Edit Custom Gesture* mode with the existing pattern, Type, and action prefilled — change just the action, redraw the pattern, or both, then click **Update**. If you redraw into a new pattern, the original entry is replaced; if you keep the pattern, the existing mapping is overwritten in place.
+
 Recognized by direction-change detection (segment ≥ 30 px, dominant axis ratio ≥ 1.5).
 
 ### Apps for Mouse Gestures (Gesture Apps)
