@@ -14,6 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var gesturesSectionHeader: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
 
+    /// 첫 실행 자동 알림이 이미 표시됐는지 추적. 사용자가 finishLaunching 직후
+    /// hotkey로 toggleEnabled을 빠르게 눌러 동기 alert을 띄운 직후 async 블록이
+    /// 같은 alert을 다시 띄우는 race를 막는다.
+    private var didShowLaunchPermissionAlert = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
@@ -49,6 +54,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         buildStatusItem()
         applyState(showAlertOnFailure: false)
+
+        // 첫 실행 시 권한이 하나라도 없으면 자동으로 안내한다.
+        // 사용자가 메뉴를 열어 "ON (no permission)"을 발견하기 전에 능동적으로 알림.
+        // applyState가 메뉴를 갱신한 직후에 띄워야 메뉴 상태가 일관된다.
+        if !PermissionChecker.allGranted {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.didShowLaunchPermissionAlert else { return }
+                self.didShowLaunchPermissionAlert = true
+                self.showPermissionAlert()
+            }
+        }
     }
 
     // MARK: - NSMenuDelegate
@@ -197,6 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateMenuStateUI() {
         let enabled = EventTapController.shared.isEnabled
         let running = EventTapController.shared.isRunning
+        let axOK = PermissionChecker.accessibilityGranted
+        let imOK = PermissionChecker.inputMonitoringGranted
+        let permissionsOK = axOK && imOK
 
         toggleItem.state = enabled ? .on : .off
         chromiumGesturesItem.state = EventTapController.shared.chromiumGesturesEnabled ? .on : .off
@@ -208,36 +227,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webkitGesturesItem.isEnabled = enabled
         customizeItem.isEnabled = true
 
-        // 섹션 헤더 — mouse-up OFF 또는 권한 부족 상태를 명시해 inert 상태를 인지시킨다.
-        // 체크마크는 영속 의도값을 보여주지만, master/권한이 없으면 실제로는 동작하지 않으므로 단서가 필요하다.
+        // 섹션 헤더 — mouse-up OFF / 권한 부족 / 미동작(stopped) 상태를 명시해 inert 상태를 인지시킨다.
+        // 헤더와 statusText 모두 동일 신호(permissionsOK)를 우선 평가해 상태 표시 모순을 방지.
         if !enabled {
             gesturesSectionHeader.title = "Browser Gestures (mouse-up off)"
-        } else if !running {
+        } else if !permissionsOK {
             gesturesSectionHeader.title = "Browser Gestures (no permission)"
+        } else if !running {
+            gesturesSectionHeader.title = "Browser Gestures (stopped)"
         } else {
             gesturesSectionHeader.title = "Browser Gestures"
         }
 
+        // Status 라벨 — 권한 미부여 시 두 권한을 ✓/✗로 분리 표시해
+        // 사용자가 어느 단계가 남았는지 즉시 파악하도록 한다.
         let statusText: String
         if !enabled {
             statusText = "Status: OFF"
+        } else if !permissionsOK {
+            let ax = axOK ? "✓" : "✗"
+            let im = imOK ? "✓" : "✗"
+            statusText = "Permissions: Accessibility \(ax) · Input Monitoring \(im)"
         } else if running {
             statusText = "Status: ON ✓"
         } else {
-            statusText = "Status: ON (no permission)"
+            statusText = "Status: ON (stopped)"
         }
         statusLabelItem.title = statusText
 
         if let button = statusItem.button {
-            let symbolName = (enabled && running) ? "cursorarrow.click.2" : "cursorarrow.click"
+            // 3가지 시각 상태:
+            //   - 권한 부재(빨강 경고): 사용자가 즉시 인지해야 할 blocker
+            //   - master OFF(회색 outline): 사용자가 의도적으로 끔
+            //   - 정상 동작(filled): 모든 조건 충족
+            let symbolName: String
+            let tint: NSColor?
+            if enabled && !permissionsOK {
+                symbolName = "exclamationmark.triangle.fill"
+                tint = .systemRed
+            } else if enabled && running {
+                symbolName = "cursorarrow.click.2"
+                tint = nil
+            } else {
+                symbolName = "cursorarrow.click"
+                tint = nil
+            }
             if let img = NSImage(systemSymbolName: symbolName,
                                   accessibilityDescription: "right-click on up") {
-                img.isTemplate = true
+                // tint를 적용하려면 isTemplate=false (template은 색이 시스템에 의해 강제됨)
+                img.isTemplate = (tint == nil)
                 button.image = img
                 button.title = ""
+                button.contentTintColor = tint
             } else {
                 button.image = nil
                 button.title = (enabled && running) ? "●" : "○"
+                button.contentTintColor = tint
             }
         }
 
@@ -323,41 +368,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openPrivacySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+        // PrivacyPane.accessibility.url로 위임해 URL 단일 소스 유지.
+        openPrivacyPane(.accessibility)
     }
 
     @objc private func showAbout() {
-        let info = Bundle.main.infoDictionary
-        let version = (info?["CFBundleShortVersionString"] as? String) ?? "dev"
-        let alert = NSAlert()
-        alert.messageText = "gesture-ex \(version)"
-        alert.informativeText = """
-        Right-click on mouse-up + browser mouse gestures
-        for Chromium and WebKit.
+        // macOS 표준 About 패널 — 다른 앱과 일관된 룩(아이콘·이름·버전·copyright)을
+        // 자동으로 채우고, credits만 우리가 주입한다.
+        let credits = NSAttributedString(
+            string: """
+            Right-click on mouse-up + browser mouse gestures
+            for Chromium and WebKit.
 
-        ⌥⌘G  toggle on/off
-        ⇧⌘,  open Settings
-        """
-        alert.runModal()
+            ⌥⌘G  toggle on/off
+            ⇧⌘,  open Settings
+            """,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.labelColor,
+            ]
+        )
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            NSApplication.AboutPanelOptionKey.credits: credits,
+        ])
     }
 
     private func showPermissionAlert() {
+        let axOK = PermissionChecker.accessibilityGranted
+        let imOK = PermissionChecker.inputMonitoringGranted
+        let ax = axOK ? "✓" : "✗"
+        let im = imOK ? "✓" : "✗"
+
+        // 두 권한이 모두 부여된 경우엔 알릴 게 없다 (이중 호출 방지).
+        if axOK && imOK { return }
+
+        let granted = (axOK ? 1 : 0) + (imOK ? 1 : 0)
+
         let alert = NSAlert()
-        alert.messageText = "권한이 필요합니다"
+        alert.messageText = "Permissions required (\(granted)/2 granted)"
         alert.informativeText = """
-        다음 두 권한을 모두 부여해주세요:
+        gesture-ex needs both permissions to convert right-clicks and read mouse drags.
 
-        • System Settings → Privacy & Security → Accessibility
-        • System Settings → Privacy & Security → Input Monitoring
+          \(ax)  Accessibility
+          \(im)  Input Monitoring
 
-        부여 후 메뉴에서 토글을 다시 켜면 적용됩니다.
+        Open Privacy & Security to grant the missing one.
         """
-        alert.addButton(withTitle: "Open Settings")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: axOK ? "Open Input Monitoring" : "Open Accessibility")
         alert.addButton(withTitle: "Later")
         if alert.runModal() == .alertFirstButtonReturn {
-            openPrivacySettings()
+            // 부족한 첫 번째 권한 페인으로 직접 이동한다.
+            if !axOK {
+                openPrivacyPane(.accessibility)
+            } else {
+                openPrivacyPane(.inputMonitoring)
+            }
+        }
+    }
+
+    private enum PrivacyPane {
+        case accessibility
+        case inputMonitoring
+
+        var url: URL? {
+            switch self {
+            case .accessibility:
+                return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            case .inputMonitoring:
+                return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            }
+        }
+    }
+
+    private func openPrivacyPane(_ pane: PrivacyPane) {
+        if let url = pane.url {
+            NSWorkspace.shared.open(url)
         }
     }
 }

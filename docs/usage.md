@@ -42,11 +42,16 @@ The `Active:` line tells you whether the currently-frontmost app is recognized a
 
 ## Customize
 
-Open Settings via `⇧⌘,` or menu → **Open Config…** — a sidebar window with four sections.
+Open Settings via `⇧⌘,` or menu → **Open Config…** — a sidebar window with five sections: **Gestures**, **Overlay**, **Gesture Apps**, **Browsers**, **Right-click Apps**.
 
-### Gesture Mappings
+### Gestures
 
-Pick an action for each cardinal direction (←/→/↑/↓). Each popup item shows the action name **and the keyboard shortcut that will be synthesized**, so you can predict the result in any app:
+The **Gestures** page contains two cards:
+
+- **4-Direction Mappings** — pick an action for each cardinal direction (←/→/↑/↓)
+- **Custom Gestures** — multi-segment patterns (see below)
+
+Each popup item shows the action name **and the keyboard shortcut that will be synthesized**, so you can predict the result in any app. Actions are grouped into four categories — Navigation / Tabs & Windows / Scroll / Page — plus the standalone **— (Disabled)** entry at the top:
 
 | Action | Shortcut | Action | Shortcut |
 |---|---|---|---|
@@ -60,7 +65,7 @@ Pick an action for each cardinal direction (←/→/↑/↓). Each popup item sh
 | Reopen Closed Tab | ⇧⌘T | Next Tab | ⌘⌥→ |
 | Disabled | (no key) | Previous Tab | ⌘⌥← |
 
-### Live Overlay
+### Overlay
 
 - **Trail color** — system color picker
 - **Background color** — color picker for the floating action label
@@ -74,7 +79,7 @@ Pick an action for each cardinal direction (←/→/↑/↓). Each popup item sh
 2. Click and drag inside the drawing area to capture a pattern
 3. Pattern preview updates live (e.g. `←↑`)
 4. Pick a **Type** for the action:
-   - **Built-in Action** — choose one of the 13 predefined actions from the *Action* popup (same list as the 4-direction mappings).
+   - **Built-in Action** — choose one of 16 predefined actions from the *Action* popup (same list as the 4-direction mappings, grouped into Navigation / Tabs & Windows / Scroll / Page categories; the *Disabled* entry is omitted in this popup since registering a disabled custom gesture is meaningless).
    - **Custom Shortcut** — click **Record**, then press any key combination (e.g. `⇧⌘A`, `⌥F5`, `⌃Space`). The captured combo appears next to *Shortcut*. Press **Esc** with no modifiers to cancel recording, or click **Re-record** to overwrite.
    - **Mouse Action** — pick from the *Mouse* popup: `Scroll Up` / `Scroll Down` / `Scroll Left` / `Scroll Right` (with a `lines` stepper, 1–50; default 3) or `Middle Click`. Scroll fires line-unit wheel events; Middle Click fires `otherMouseDown/Up` at the gesture release position.
 5. **Save** — pattern is persisted in `UserDefaults` and recognized next time
@@ -85,7 +90,7 @@ Each row in the list has **Edit** and **Remove** buttons. Edit reopens the same 
 
 Recognized by direction-change detection (segment ≥ 30 px, dominant axis ratio ≥ 1.5).
 
-### Apps for Mouse Gestures (Gesture Apps)
+### Gesture Apps
 
 Choose which apps fire mouse gestures. The mode dropdown decides how the engine check interacts with your list.
 
@@ -95,16 +100,26 @@ Choose which apps fire mouse gestures. The mode dropdown decides how the engine 
 | **Whitelist (Only listed)** | Gestures run in supported browsers (auto-included — you don't need to list Chrome/Safari/etc. yourself) **plus** the apps you list. The engine check is bypassed for listed apps, so non-browser apps like Warp or your IDE can be added and they will fire gestures too. |
 | **Blacklist (Exclude listed)** | Gestures run in every supported browser except the listed ones. Engine check still applies for non-listed apps. |
 
-- **Patterns** — same syntax as Mouse-up Apps (one bundle ID per line, `regex:` prefix, `#` comments)
-- **Choose App…** — pick a `.app` bundle from `/Applications` and the bundle ID is appended automatically
+- **Add an app** — click **Choose App…** and pick a `.app` bundle from `/Applications` (the bundle ID is appended automatically; this is the recommended path for most users)
+- **Show advanced patterns** — click the disclosure to reveal a free-form textarea using the same syntax as Right-click Apps (one bundle ID per line, `regex:` prefix, `#` comments)
 
 > Adding non-browser apps to the whitelist is supported, but be aware: gesture actions are keyboard shortcuts like `⌘[`, `⌘R`, `Home`/`End`. In non-browser apps these may do something different from "Back / Reload / Scroll-to-Top." `Scroll Top/Bottom`, `Close Tab`, and `New Tab` tend to behave consistently; `Back`/`Forward`/`Reload` are app-specific.
 
-This filter is independent of [Apps for Right-click on Mouse-up](#apps-for-right-click-on-mouse-up-mouse-up-apps): you can have the right-click conversion run everywhere while restricting gesture recognition to a hand-picked set of apps (browser or otherwise).
+This filter is independent of [Right-click Apps](#right-click-apps): you can have the right-click conversion run everywhere while restricting gesture recognition to a hand-picked set of apps (browser or otherwise).
 
-### Apps for Right-click on Mouse-up (Mouse-up Apps)
+### Browsers
+
+Toggle individual browsers in the catalog on/off. Disabled browsers behave like any other non-browser app — gestures only fire if you add them to the **Whitelist** on the **Gesture Apps** page.
+
+- **Chromium engine** — Chrome / Edge / Brave / Arc / Vivaldi / Opera / etc.
+- **WebKit engine** — Safari / Safari Technology Preview / Orion
+
+Unchecking a browser excludes it from auto-detection. Useful when you want gestures only in Safari (uncheck the Chromium ones) or vice versa, or when a particular browser misbehaves and you want to disable gestures there without disabling the engine entirely.
+
+### Right-click Apps
 
 Choose which apps the right-click on mouse-up conversion applies to. By default it runs in every app.
 
 - **Mode** — All apps (default) / Only listed / Exclude listed
-- **Patterns** — one bundle ID per line (`com.google.Chrome`); prefix with `regex:` for regex (`regex:^com\.google\..*`); `#` lines are comments
+- **Add an app** — click **Choose App…** and pick a `.app` bundle (recommended)
+- **Show advanced patterns** — disclosure reveals a free-form textarea: one bundle ID per line (`com.google.Chrome`); prefix with `regex:` for regex (`regex:^com\.google\..*`); `#` lines are comments

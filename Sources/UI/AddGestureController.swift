@@ -78,8 +78,6 @@ final class AddGestureController: NSObject, NSWindowDelegate {
     /// 단축키 녹화 모드일 때 활성된 NSEvent monitor.
     private var keyMonitor: Any?
 
-    /// disabled 제외한 액션 목록 — 사용자가 disabled를 등록하는 건 의미 없음
-    private let actionChoices: [BrowserAction] = BrowserAction.allCases.filter { $0 != .disabled }
 
     /// 신규 추가용 진입점.
     func show() {
@@ -132,8 +130,8 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         switch def.action {
         case .builtin(let action):
             applyActionKind(.builtin)
-            if let idx = actionChoices.firstIndex(of: action) {
-                actionPopup?.selectItem(at: idx)
+            if let popup = actionPopup {
+                BrowserActionPopup.select(action, in: popup)
             }
         case .shortcut(let s):
             applyActionKind(.shortcut)
@@ -243,9 +241,7 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         actionRow.addArrangedSubview(actionHead)
 
         let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
-        for action in actionChoices {
-            popup.addItem(withTitle: action.menuTitle)
-        }
+        BrowserActionPopup.populate(popup, includeDisabled: false)
         popup.translatesAutoresizingMaskIntoConstraints = false
         popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
         self.actionPopup = popup
@@ -410,7 +406,10 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         }
         switch currentActionKind() {
         case .builtin:
-            saveButton?.isEnabled = true
+            // popup이 representedObject 없는 카테고리 헤더에 머무르면 saveTapped가 silent fail —
+            // 표시상으로 활성된 Save가 작동 안 하는 상태를 막기 위해 실제 액션 유무로 검증.
+            let hasAction = actionPopup.flatMap { BrowserActionPopup.selectedAction(in: $0) } != nil
+            saveButton?.isEnabled = hasAction
         case .shortcut:
             saveButton?.isEnabled = (capturedShortcut != nil)
         case .mouse:
@@ -474,9 +473,8 @@ final class AddGestureController: NSObject, NSWindowDelegate {
         switch currentActionKind() {
         case .builtin:
             guard let popup = actionPopup,
-                  popup.indexOfSelectedItem >= 0,
-                  popup.indexOfSelectedItem < actionChoices.count else { return }
-            action = .builtin(actionChoices[popup.indexOfSelectedItem])
+                  let chosen = BrowserActionPopup.selectedAction(in: popup) else { return }
+            action = .builtin(chosen)
         case .shortcut:
             guard let shortcut = capturedShortcut else { return }
             action = .shortcut(shortcut)
