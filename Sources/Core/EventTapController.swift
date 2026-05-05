@@ -185,7 +185,7 @@ final class EventTapController {
             let app = NSWorkspace.shared.frontmostApplication
             let bundleID = app?.bundleIdentifier
             guard GestureAppFilter.shouldApply(to: bundleID) else {
-                return nil
+                return swallowAndBalance(at: upLoc)
             }
             if !GestureAppFilter.isExplicitlyAllowed(bundleID: bundleID) {
                 guard gesturesEnabledForFrontmost else {
@@ -193,7 +193,7 @@ final class EventTapController {
                     DispatchQueue.main.async {
                         cb?(.notChromium(bundleID: bundleID, appName: app?.localizedName))
                     }
-                    return nil
+                    return swallowAndBalance(at: upLoc)
                 }
             }
 
@@ -210,7 +210,7 @@ final class EventTapController {
                 DispatchQueue.main.async {
                     cb?(.ambiguousDirection(distance: distance))
                 }
-                return nil  // 원본 up도 삼킴 → 메뉴 안 뜸
+                return swallowAndBalance(at: upLoc)
             }
 
             // ▶ 매칭: custom 다중 segment 우선 → 단일 방향은 GestureMappings
@@ -229,13 +229,13 @@ final class EventTapController {
                 DispatchQueue.main.async {
                     cb?(.ambiguousDirection(distance: distance))
                 }
-                return nil
+                return swallowAndBalance(at: upLoc)
             }
 
             // 매핑이 .disabled여도 드래그였던 이상 메뉴를 띄우지 않는다.
             // (드래그 = 제스처 시도이므로 우클릭 메뉴 발사는 일관되게 차단)
             if action.isDisabled {
-                return nil
+                return swallowAndBalance(at: upLoc)
             }
 
             ActionExecutor.execute(action)
@@ -243,11 +243,28 @@ final class EventTapController {
             DispatchQueue.main.async {
                 cb?(recognizedPattern, action)
             }
-            return nil  // 원본 up도 삼킴 → 컨텍스트 메뉴 안 뜸
+            return swallowAndBalance(at: upLoc)
 
         default:
             return Unmanaged.passUnretained(event)
         }
+    }
+
+    /// 우버튼 down/up을 모두 swallow하는 분기에서 사용. HID tap suppression만으로는
+    /// WindowServer/AppKit의 `pressedMouseButtons` 캐시에 right=pressed가 잔존하여
+    /// Chromium NSDraggingSession이 후속 좌드래그를 "좌+우 동시 held"로 오인하고
+    /// release를 매칭하지 못하는 stuck 버그가 발생한다. 합성 right-up 1발을
+    /// SYNTHETIC_TAG로 발사해 캐시를 정상화한다.
+    private func swallowAndBalance(at location: CGPoint) -> Unmanaged<CGEvent>? {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        if let synthUp = CGEvent(mouseEventSource: source,
+                                  mouseType: .rightMouseUp,
+                                  mouseCursorPosition: location,
+                                  mouseButton: .right) {
+            synthUp.setIntegerValueField(.eventSourceUserData, value: Self.SYNTHETIC_TAG)
+            synthUp.post(tap: .cghidEventTap)
+        }
+        return nil
     }
 }
 
