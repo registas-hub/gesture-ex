@@ -34,7 +34,7 @@
     <true/>
 
     <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
+    <string>14.0</string>
 
     <key>NSHumanReadableCopyright</key>
     <string>© 2026</string>
@@ -42,5 +42,9 @@
     <!-- TCC 권한 사용 사유 (Accessibility/Input Monitoring 다이얼로그에 표시) -->
     <key>NSAppleEventsUsageDescription</key>
     <string>우클릭 이벤트를 가로채 마우스 제스처 액션을 발사하기 위해 사용됩니다.</string>
+
+    <!-- Screen Recording 권한 사유 (캡처 기능 호출 시 OS가 표시) -->
+    <key>NSScreenCaptureDescription</key>
+    <string>제스처로 호출되는 화면 캡처 기능을 위해 사용됩니다.</string>
 </dict>
 </plist>

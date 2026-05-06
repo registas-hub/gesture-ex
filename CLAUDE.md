@@ -9,7 +9,7 @@ macOS menu-bar utility (`LSUIElement`, accessory app) that
 1. Converts right-click to fire on **mouse-up** instead of mouse-down at the HID level.
 2. Recognizes 4-direction and multi-segment **mouse gestures** in Chromium and WebKit browsers, then synthesizes the mapped keystroke / wheel / middle-click.
 
-Target: macOS 11+. Single Swift module, no SwiftPM, no Xcode project.
+Target: macOS 14+ (Sonoma — required by ScreenCaptureKit 14.0 API used in the Capture module). Single Swift module, no SwiftPM, no Xcode project.
 
 ## Build / Run / Iterate
 
@@ -23,7 +23,8 @@ pkill -f gesture-ex && ./build.sh && open gesture-ex.app
 
 Notes:
 - `build.sh` finds every `Sources/**/*.swift` and feeds them to `swiftc -O` in one invocation. Adding a new `.swift` file under `Sources/` is automatic — no manifest to edit.
-- Frameworks linked: `Cocoa`, `ServiceManagement`. Carbon is imported via `import Carbon.HIToolbox` for hotkey constants only.
+- `build.sh` detects host arch via `uname -m` and passes `-target arm64-apple-macos14.0` or `x86_64-apple-macos14.0` to `swiftc`. Other architectures abort the build.
+- Frameworks linked: `Cocoa`, `ServiceManagement`, `ScreenCaptureKit` (the last is required by the Capture module's macOS 14 API). Carbon is imported via `import Carbon.HIToolbox` for hotkey constants only — not linked.
 - Version string is injected from `git describe --tags --always --dirty` into `CFBundleShortVersionString` / `CFBundleVersion` at build time.
 - Code signing: prefers self-signed identity `RightClickOnUpDev` (keeps TCC permissions across rebuilds), falls back to ad-hoc (TCC re-prompts every build). Override with `SIGNING_IDENTITY="My Cert" ./build.sh`. The cert isn't in the repo — see `docs/installation.md` for the openssl one-liner if missing.
 
@@ -38,10 +39,10 @@ There is **no test target, test directory, or test runner** in this repo. Verifi
 | Layer | Role | Notable types |
 |---|---|---|
 | `App/` | NSApp lifecycle, status-bar menu, global hotkey | `AppDelegate`, `HotkeyManager`, `PermissionChecker` |
-| `Core/` | Event-tap pipeline and action dispatch | `EventTapController`, `PathAnalyzer`, `ActionExecutor`, `BrowserDetector` |
-| `Domain/` | Pure value types (`Codable` enums, structs) | `GestureDirection`, `GesturePattern`, `GestureAction`, `BrowserAction`, `KeyShortcut`, `MouseAction`, `GestureSkipReason` |
-| `Storage/` | `UserDefaults`-backed prefs (no DB, no files) | `GestureMappings`, `CustomGestureMappings`, `OverlayPreferences`, `BrowserPreferences`, `AppFilter`, `GestureAppFilter`, `HotkeyPreferences` |
-| `UI/` | AppKit windows / panels (`nonactivatingPanel` for overlays) | `SettingsWindow`, `GestureTrailWindow`, `AddGestureController`, `BrowserActionPopup`, `GestureToast` |
+| `Core/` | Event-tap pipeline and action dispatch | `EventTapController`, `PathAnalyzer`, `ActionExecutor`, `BrowserDetector`, `CaptureService` (protocol + factory), `ScreenCaptureKitService`, `CaptureFileNamer` |
+| `Domain/` | Pure value types (`Codable` enums, structs) | `GestureDirection`, `GesturePattern`, `GestureAction`, `BrowserAction`, `KeyShortcut`, `MouseAction`, `GestureSkipReason`, `CaptureTarget`, `CaptureDestination` (OptionSet), `CaptureRequest`, `CaptureResult`, `CaptureError` |
+| `Storage/` | `UserDefaults`-backed prefs (no DB, no files) | `GestureMappings`, `CustomGestureMappings`, `OverlayPreferences`, `BrowserPreferences`, `AppFilter`, `GestureAppFilter`, `HotkeyPreferences`, `CapturePreferences` |
+| `UI/` | AppKit windows / panels (`nonactivatingPanel` for overlays) | `SettingsWindow`, `GestureTrailWindow`, `AddGestureController`, `BrowserActionPopup`, `GestureToast`, `RegionSelectionWindow` |
 
 ### Event flow (the hot path)
 
@@ -69,12 +70,26 @@ Everything is in `UserDefaults.standard`. There is no SQLite, no file-backed pre
 
 `PermissionChecker` exposes `accessibility` and `inputMonitoring` `PermissionStatus` values (`granted` / `denied` / `notDetermined`). Both are required for the HID tap. `AppDelegate` shows a startup alert (suppressible via `permissionAlert.suppressedAtLaunch`) and an explicit alert when toggle attempts fail. `Open Privacy Settings…` deep-links via `x-apple.systempreferences:` URLs.
 
+Screen Recording is required by the Capture module; `Info.plist` already declares `NSScreenCaptureDescription`, but `PermissionChecker` does not yet expose this status — wiring it in is part of the work to surface Capture as a user-facing action (see below).
+
+### Capture module (dormant)
+
+The Capture module is fully implemented but **not yet wired into the gesture pipeline, `ActionExecutor`, or Settings UI**. There is no `GestureAction` case for capture, so a user cannot trigger it today. Treat it as an unreleased feature that's ready to be plugged in.
+
+- **Targets / destinations**: `CaptureTarget` covers `fullScreen` / `activeWindow` / `region` / `frontmostApp`; `CaptureDestination` is an `OptionSet` over `clipboard` / `fileDesktop` / `fileCustomPath` / `returnImage`. Output is PNG or JPEG (configurable quality).
+- **Backend swap-point**: `CaptureService` (`Sources/Core/CaptureService.swift`) is the protocol; `ScreenCaptureKitService` is the SC 14.0 implementation. Use `CaptureServiceFactory.makeDefault()` to obtain instances — do not construct `ScreenCaptureKitService` directly outside that factory.
+- **Region picker DI**: region selection is injected via the `RegionPicker` protocol. The default is `RegionSelectionWindow.shared` (interactive overlay; ESC / Cmd+. cancel; 60 s timeout). Tests / alternate UIs can substitute their own picker.
+- **Wiring checklist** (when surfacing Capture as a user-facing action): (1) add a `.capture(CaptureRequest)` case to `GestureAction`; (2) extend `ActionExecutor.execute(_:)` to obtain a service via `CaptureServiceFactory.makeDefault()` and call `capture(_:)` async; (3) add Screen Recording to `PermissionChecker` and the startup alert; (4) expose `CapturePreferences` in `SettingsWindow`.
+- **Persistence**: `CapturePreferences` follows the same `UserDefaults` rules as the rest of the `Storage/` layer — `object(forKey:) == nil` for unset detection, `JSONEncoder`/`Decoder` round-trip for Codable values, `NotificationCenter` for change observers.
+
 ### Adding things
 
 - **New built-in action**: add a `case` to `BrowserAction` (`Sources/Domain/BrowserAction.swift`) with `keyCode` / `flags` / `label`. It auto-appears in the 4-direction popups and Custom Gesture *Built-in Action* picker.
 - **One-off shortcut a user wants**: don't add to `BrowserAction` — use the *Custom Shortcut* path in the Add Custom Gesture modal, which records `keyCode + CGEventFlags` into a `KeyShortcut` at runtime.
 - **New browser**: append the bundle ID to `BrowserDetector.chromiumBundles` or `webkitBundles` (`Sources/Core/BrowserDetector.swift`).
 - **New non-keyboard action**: extend `MouseAction` and the corresponding branch in `ActionExecutor.postMouse(_:)`.
+- **New capture target**: add a `case` to `CaptureTarget` (`Sources/Domain/CaptureTarget.swift`) preserving `Codable` conformance, then add a branch to the target switch in `ScreenCaptureKitService.capture(_:)`.
+- **New capture destination**: `CaptureDestination` is an `OptionSet` — pick the next free `rawValue` bit, add the case, and handle it in `ScreenCaptureKitService.writeOutputs(_:)` alongside the existing `writeToFile(_:)` / `writeToClipboard(_:)` helpers.
 
 ## Release
 

@@ -10,6 +10,7 @@ private enum SettingsSection: Int, CaseIterable {
     case browsers
     case appFilter
     case shortcut
+    case capture
 
     var label: String {
         switch self {
@@ -19,6 +20,7 @@ private enum SettingsSection: Int, CaseIterable {
         case .browsers:    return "Browsers"
         case .appFilter:   return "Right-click Apps"
         case .shortcut:    return "Shortcut"
+        case .capture:     return "Capture"
         }
     }
 
@@ -31,6 +33,7 @@ private enum SettingsSection: Int, CaseIterable {
         case .browsers:    return "safari"
         case .appFilter:   return "app.badge"
         case .shortcut:    return "command"
+        case .capture:     return "camera.viewfinder"
         }
     }
 }
@@ -68,6 +71,16 @@ final class SettingsWindow: NSObject,
     private weak var opacityLabel: NSTextField?
     private weak var showLabelCheckbox: NSButton?
     private weak var lingerPopup: NSPopUpButton?
+
+    // Capture 컨트롤 — reset / 외부 변경 알림 시 갱신을 위해 보유.
+    private weak var captureClipboardCheckbox: NSButton?
+    private weak var captureDesktopCheckbox: NSButton?
+    private weak var captureCustomPathCheckbox: NSButton?
+    private weak var captureFormatPopup: NSPopUpButton?
+    private weak var captureQualitySlider: NSSlider?
+    private weak var captureQualityLabel: NSTextField?
+    private weak var captureCustomPathLabel: NSTextField?
+    private weak var captureClearPathButton: NSButton?
 
     /// Custom gesture 리스트 컨테이너 — 추가/삭제 시 동적으로 갱신.
     private weak var customListStack: NSStackView?
@@ -174,11 +187,7 @@ final class SettingsWindow: NSObject,
     private func buildSidebar() -> NSView {
         let table = NSTableView()
         table.headerView = nil
-        if #available(macOS 11.0, *) {
-            table.style = .sourceList
-        } else {
-            table.selectionHighlightStyle = .sourceList
-        }
+        table.style = .sourceList
         table.rowSizeStyle = .default
         table.intercellSpacing = NSSize(width: 0, height: 4)
         table.usesAutomaticRowHeights = false
@@ -309,6 +318,7 @@ final class SettingsWindow: NSObject,
         case .browsers:    body = buildBrowsersBody()
         case .appFilter:   body = buildAppFilterBody()
         case .shortcut:    body = buildShortcutBody()
+        case .capture:     body = buildCaptureBody()
         }
 
         let container = NSView()
@@ -661,6 +671,316 @@ final class SettingsWindow: NSObject,
         guard let monitor = hotkeyKeyMonitor else { return }
         NSEvent.removeMonitor(monitor)
         hotkeyKeyMonitor = nil
+    }
+
+    // MARK: - Capture page
+
+    /// Screen Capture 설정 페이지.
+    /// CapturePreferences의 destinations / format / jpegQuality / customPath 4개 값을 노출한다.
+    /// 캡처 액션은 아직 GestureAction에 연결되지 않았으나, 이 페이지는 prefs를 사용자에게 즉시 노출하여
+    /// 향후 액션 연결 시 곧바로 의미 있는 기본값이 되도록 한다.
+    private func buildCaptureBody() -> NSStackView {
+        let stack = makePageStack(
+            title: "Capture",
+            description: "Configure where screenshots are saved and how they're encoded."
+        )
+
+        stack.addArrangedSubview(buildCaptureGrid())
+
+        // 파일명 패턴 안내 — 변경 불가하므로 read-only 텍스트로 노출.
+        let nameInfo = NSTextField(wrappingLabelWithString:
+            "Files are saved as gesture-ex-YYYYMMDD-HHmmss.<ext>.")
+        nameInfo.font = .systemFont(ofSize: 11)
+        nameInfo.textColor = .secondaryLabelColor
+        nameInfo.preferredMaxLayoutWidth = 460
+        stack.addArrangedSubview(nameInfo)
+
+        // SettingsWindow 싱글톤이고 buildCaptureBody는 build 시 1회만 호출되므로 옵저버 해제는 불필요.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshCaptureUI),
+            name: .capturePreferencesChanged,
+            object: nil
+        )
+
+        return stack
+    }
+
+    /// 4행 NSGridView: Destinations / Format / Quality / Custom path.
+    private func buildCaptureGrid() -> NSView {
+        let grid = NSGridView()
+        grid.rowSpacing = 12
+        grid.columnSpacing = 14
+        grid.translatesAutoresizingMaskIntoConstraints = false
+
+        let dest = CapturePreferences.destinations
+
+        // 1) Destinations — 3개 체크박스를 수평 스택에 묶는다. tag = OptionSet rawValue 비트.
+        let destStack = NSStackView()
+        destStack.orientation = .horizontal
+        destStack.spacing = 16
+        destStack.alignment = .centerY
+
+        let clipboardCb = NSButton(
+            checkboxWithTitle: "Clipboard",
+            target: self,
+            action: #selector(captureDestinationToggled(_:))
+        )
+        clipboardCb.tag = CaptureDestination.clipboard.rawValue
+        clipboardCb.state = dest.contains(.clipboard) ? .on : .off
+        self.captureClipboardCheckbox = clipboardCb
+        destStack.addArrangedSubview(clipboardCb)
+
+        let desktopCb = NSButton(
+            checkboxWithTitle: "Desktop",
+            target: self,
+            action: #selector(captureDestinationToggled(_:))
+        )
+        desktopCb.tag = CaptureDestination.fileDesktop.rawValue
+        desktopCb.state = dest.contains(.fileDesktop) ? .on : .off
+        self.captureDesktopCheckbox = desktopCb
+        destStack.addArrangedSubview(desktopCb)
+
+        let customCb = NSButton(
+            checkboxWithTitle: "Custom Path",
+            target: self,
+            action: #selector(captureDestinationToggled(_:))
+        )
+        customCb.tag = CaptureDestination.fileCustomPath.rawValue
+        customCb.state = dest.contains(.fileCustomPath) ? .on : .off
+        self.captureCustomPathCheckbox = customCb
+        destStack.addArrangedSubview(customCb)
+
+        grid.addRow(with: [makeFieldLabel("Save to"), destStack])
+
+        // 2) Format
+        let formatPopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 26))
+        formatPopup.addItem(withTitle: "PNG")
+        formatPopup.addItem(withTitle: "JPEG")
+        formatPopup.target = self
+        formatPopup.action = #selector(captureFormatChanged(_:))
+        formatPopup.translatesAutoresizingMaskIntoConstraints = false
+        formatPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+        let isJPEG: Bool = {
+            if case .jpeg = CapturePreferences.format { return true } else { return false }
+        }()
+        formatPopup.selectItem(at: isJPEG ? 1 : 0)
+        self.captureFormatPopup = formatPopup
+        grid.addRow(with: [makeFieldLabel("Format"), formatPopup])
+
+        // 3) JPEG quality slider + value label
+        let qualityHStack = NSStackView()
+        qualityHStack.orientation = .horizontal
+        qualityHStack.spacing = 10
+        qualityHStack.alignment = .centerY
+
+        let quality = CapturePreferences.jpegQuality
+        let qualitySlider = NSSlider(
+            value: quality * 100,
+            minValue: 10,
+            maxValue: 100,
+            target: self,
+            action: #selector(captureQualityChanged(_:))
+        )
+        qualitySlider.isContinuous = true
+        qualitySlider.isEnabled = isJPEG
+        qualitySlider.translatesAutoresizingMaskIntoConstraints = false
+        qualitySlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        self.captureQualitySlider = qualitySlider
+
+        let qualityValueLabel = NSTextField(labelWithString: "\(Int(quality * 100))%")
+        qualityValueLabel.font = .systemFont(ofSize: 12)
+        qualityValueLabel.textColor = isJPEG ? .secondaryLabelColor : .tertiaryLabelColor
+        qualityValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        qualityValueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        self.captureQualityLabel = qualityValueLabel
+
+        qualityHStack.addArrangedSubview(qualitySlider)
+        qualityHStack.addArrangedSubview(qualityValueLabel)
+        grid.addRow(with: [makeFieldLabel("JPEG quality"), qualityHStack])
+
+        // 4) Custom path: 라벨 + Choose / Clear 버튼.
+        let pathStack = NSStackView()
+        pathStack.orientation = .horizontal
+        pathStack.spacing = 8
+        pathStack.alignment = .centerY
+
+        let pathLabel = NSTextField(labelWithString: customPathDisplayString())
+        pathLabel.font = .systemFont(ofSize: 12)
+        pathLabel.textColor = .secondaryLabelColor
+        pathLabel.lineBreakMode = .byTruncatingMiddle
+        pathLabel.translatesAutoresizingMaskIntoConstraints = false
+        pathLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        self.captureCustomPathLabel = pathLabel
+        pathStack.addArrangedSubview(pathLabel)
+
+        let chooseButton = NSButton(
+            title: "Choose Folder…",
+            target: self,
+            action: #selector(captureChooseCustomPath)
+        )
+        chooseButton.bezelStyle = .rounded
+        pathStack.addArrangedSubview(chooseButton)
+
+        let clearButton = NSButton(
+            title: "Clear",
+            target: self,
+            action: #selector(captureClearCustomPath)
+        )
+        clearButton.bezelStyle = .rounded
+        clearButton.isEnabled = (CapturePreferences.customPath != nil)
+        self.captureClearPathButton = clearButton
+        pathStack.addArrangedSubview(clearButton)
+
+        grid.addRow(with: [makeFieldLabel("Custom path"), pathStack])
+
+        if grid.numberOfColumns > 0 {
+            grid.column(at: 0).width = 156
+        }
+        for row in 0..<grid.numberOfRows {
+            grid.cell(atColumnIndex: 0, rowIndex: row).xPlacement = .trailing
+        }
+
+        return grid
+    }
+
+    /// customPath의 사용자에게 보여줄 짧은 표현. nil이면 placeholder.
+    private func customPathDisplayString() -> String {
+        guard let url = CapturePreferences.customPath else { return "(none)" }
+        return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+    }
+
+    // MARK: - Capture handlers
+
+    /// CapturePreferences를 읽어 캡처 페이지 컨트롤들을 동기화하는 단일 진입점.
+    /// `.capturePreferencesChanged` 옵저버 + Reset / Import 흐름이 모두 이 메서드를 호출한다.
+    @objc private func refreshCaptureUI() {
+        let dest = CapturePreferences.destinations
+        let onCount = [.clipboard, .fileDesktop, .fileCustomPath]
+            .filter { (bit: CaptureDestination) in dest.contains(bit) }.count
+
+        captureClipboardCheckbox?.state = dest.contains(.clipboard) ? .on : .off
+        captureDesktopCheckbox?.state = dest.contains(.fileDesktop) ? .on : .off
+        captureCustomPathCheckbox?.state = dest.contains(.fileCustomPath) ? .on : .off
+
+        // 최소 1개는 반드시 켜져 있어야 한다 — 마지막 1개를 끄려는 시도를 silent revert로 막으면
+        // 사용자가 클릭이 무시된 줄 오인한다. 마지막으로 남은 켠 체크박스를 비활성화하여 시도 자체를 차단한다.
+        captureClipboardCheckbox?.isEnabled = !(onCount == 1 && dest.contains(.clipboard))
+        captureDesktopCheckbox?.isEnabled = !(onCount == 1 && dest.contains(.fileDesktop))
+        captureCustomPathCheckbox?.isEnabled = !(onCount == 1 && dest.contains(.fileCustomPath))
+
+        let isJPEG: Bool = {
+            if case .jpeg = CapturePreferences.format { return true } else { return false }
+        }()
+        captureFormatPopup?.selectItem(at: isJPEG ? 1 : 0)
+
+        let quality = CapturePreferences.jpegQuality
+        captureQualitySlider?.doubleValue = quality * 100
+        captureQualitySlider?.isEnabled = isJPEG
+        captureQualityLabel?.stringValue = "\(Int(quality * 100))%"
+        captureQualityLabel?.textColor = isJPEG ? .secondaryLabelColor : .tertiaryLabelColor
+
+        captureCustomPathLabel?.stringValue = customPathDisplayString()
+        captureClearPathButton?.isEnabled = (CapturePreferences.customPath != nil)
+    }
+
+    /// 3개 destination 체크박스가 공유하는 핸들러.
+    /// 마지막 1개를 끄려는 시도는 무시 — destinations가 비어 있으면 캡처가 의미를 잃는다.
+    @objc private func captureDestinationToggled(_ sender: NSButton) {
+        let bit = CaptureDestination(rawValue: sender.tag)
+        var current = CapturePreferences.destinations
+
+        if sender.state == .on {
+            // Custom Path를 켰는데 경로가 없으면 폴더 선택 다이얼로그를 자동으로 띄운다.
+            if bit == .fileCustomPath, CapturePreferences.customPath == nil {
+                if !chooseCustomPathInteractive() {
+                    // 사용자가 취소 — 체크박스를 다시 off로 되돌리고 끝낸다.
+                    sender.state = .off
+                    return
+                }
+            }
+            current.insert(bit)
+        } else {
+            var next = current
+            next.remove(bit)
+            if next.rawValue == 0 {
+                // 마지막 1개 — 즉시 복원하고 사용자에게 silent revert 신호를 준다.
+                sender.state = .on
+                return
+            }
+            current = next
+        }
+        CapturePreferences.destinations = current
+    }
+
+    @objc private func captureFormatChanged(_ sender: NSPopUpButton) {
+        let idx = sender.indexOfSelectedItem
+        switch idx {
+        case 0: CapturePreferences.format = .png
+        case 1: CapturePreferences.format = .jpeg(quality: CapturePreferences.jpegQuality)
+        default: break
+        }
+    }
+
+    @objc private func captureQualityChanged(_ sender: NSSlider) {
+        let value = sender.doubleValue / 100.0
+        // 슬라이더는 JPEG일 때만 enabled이지만 방어적으로 한 번 더 확인.
+        // jpegQuality 값을 직접 갱신하면 format이 PNG일 때도 다음 JPEG 전환에서 보존된다.
+        CapturePreferences.jpegQuality = value
+        if case .jpeg = CapturePreferences.format {
+            CapturePreferences.format = .jpeg(quality: value)
+        }
+        captureQualityLabel?.stringValue = "\(Int(value * 100))%"
+    }
+
+    @objc private func captureChooseCustomPath() {
+        _ = chooseCustomPathInteractive()
+    }
+
+    /// 폴더 선택 다이얼로그를 띄우고 결과를 영속화한다. 사용자가 취소하면 false 반환.
+    /// CapturePreferences.customPath setter는 검증 실패 silent drop과 "동일 값 silent skip"을
+    /// 모두 같은 no-op로 처리하므로, setter 호출 후 값 비교로는 거부 여부를 구분할 수 없다.
+    /// 사용자에게 정확한 사유를 알리기 위해 UI에서 같은 검증을 한 번 더 수행해 분기한다.
+    @discardableResult
+    private func chooseCustomPathInteractive() -> Bool {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Capture Save Folder"
+        panel.prompt = "Choose"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = CapturePreferences.customPath
+            ?? FileManager.default.homeDirectoryForCurrentUser
+
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        guard exists, isDir.boolValue,
+              FileManager.default.isWritableFile(atPath: url.path) else {
+            presentError(
+                title: "Folder not usable",
+                message: "The selected folder must exist and be writable. Please choose a different folder."
+            )
+            return false
+        }
+
+        CapturePreferences.customPath = url
+        return true
+    }
+
+    @objc private func captureClearCustomPath() {
+        // 경로를 지우면 .fileCustomPath 비트도 함께 정리한다.
+        // 그렇지 않으면 destinations에 .fileCustomPath가 남았는데 customPath가 nil인 모순 상태가 되어
+        // 캡처 시점에 출력 대상을 찾지 못하고 silent failure가 발생한다.
+        var dests = CapturePreferences.destinations
+        if dests.contains(.fileCustomPath) {
+            dests.remove(.fileCustomPath)
+            if dests.rawValue == 0 { dests.insert(.clipboard) }   // 비어 있을 수 없다
+            CapturePreferences.destinations = dests
+        }
+        CapturePreferences.customPath = nil
     }
 
     /// 마우스 제스처 인식의 적용 대상 앱 설정 페이지.
@@ -1172,13 +1492,11 @@ final class SettingsWindow: NSObject,
         let alert = NSAlert()
         alert.messageText = "Reset all settings to defaults?"
         alert.informativeText = """
-        This will erase your custom gestures, gesture mappings, overlay colors, app filters, browser toggles, and global shortcut. This cannot be undone.
+        This will erase your custom gestures, gesture mappings, overlay colors, app filters, browser toggles, global shortcut, and capture preferences. This cannot be undone.
         """
         alert.alertStyle = .warning
         let resetBtn = alert.addButton(withTitle: "Reset")
-        if #available(macOS 11.0, *) {
-            resetBtn.hasDestructiveAction = true
-        }
+        resetBtn.hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         present(alert) { [weak self] response in
             if response == .alertFirstButtonReturn {
@@ -1195,6 +1513,7 @@ final class SettingsWindow: NSObject,
         GestureAppFilter.resetToDefaults()
         BrowserPreferences.resetToDefaults()
         HotkeyPreferences.resetToDefaults()
+        CapturePreferences.resetToDefaults()
         refreshAllControlsFromStorage()
         // Reset은 advanced 패널을 기본(접힘) 상태로 되돌린다. Import는 사용자가 펴둔 상태를 보존한다.
         for controls in [appFilterControls, gestureFilterControls] {
@@ -1233,6 +1552,7 @@ final class SettingsWindow: NSObject,
             }
         }
         refreshCustomList()
+        refreshCaptureUI()
     }
 
     // MARK: - Import / Export
@@ -1241,11 +1561,7 @@ final class SettingsWindow: NSObject,
         let panel = NSSavePanel()
         panel.title = "Export Configuration"
         panel.nameFieldStringValue = defaultExportFilename()
-        if #available(macOS 11.0, *) {
-            panel.allowedContentTypes = [.json]
-        } else {
-            panel.allowedFileTypes = ["json"]
-        }
+        panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
 
         present(panel) { [weak self] response in
@@ -1260,11 +1576,7 @@ final class SettingsWindow: NSObject,
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        if #available(macOS 11.0, *) {
-            panel.allowedContentTypes = [.json]
-        } else {
-            panel.allowedFileTypes = ["json"]
-        }
+        panel.allowedContentTypes = [.json]
 
         present(panel) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
@@ -1358,7 +1670,7 @@ final class SettingsWindow: NSObject,
         let panel = NSOpenPanel()
         panel.title = "Choose Application"
         panel.prompt = "Add"
-        panel.allowedFileTypes = ["app"]
+        panel.allowedContentTypes = [.application]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
