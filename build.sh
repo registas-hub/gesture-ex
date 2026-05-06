@@ -19,10 +19,23 @@ echo "🔨 Compiling Swift sources (Sources/**/*.swift)…"
 # null-delimited으로 처리해 공백 포함 경로 안전.
 SOURCES=()
 while IFS= read -r -d '' f; do SOURCES+=("$f"); done < <(find "$DIR/Sources" -name '*.swift' -print0)
+# macOS 14+ 타겟 — ScreenCaptureKit의 SCScreenshotManager(14.0+) 단일 경로 의존.
+# arch 자동 감지: Apple Silicon → arm64, Intel → x86_64. 그 외는 빌드 중단.
+ARCH="$(uname -m)"
+case "$ARCH" in
+    arm64)   TARGET="arm64-apple-macos14.0" ;;
+    x86_64)  TARGET="x86_64-apple-macos14.0" ;;
+    *)
+        echo "❌ Unsupported architecture: $ARCH (only arm64 / x86_64 supported)"
+        exit 1
+        ;;
+esac
 swiftc "${SOURCES[@]}" \
     -o "$BIN" \
+    -target "$TARGET" \
     -framework Cocoa \
     -framework ServiceManagement \
+    -framework ScreenCaptureKit \
     -O
 
 echo "📝 Installing Info.plist…"

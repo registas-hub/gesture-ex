@@ -42,7 +42,7 @@ The cask lives at [registas-hub/homebrew-tap](https://github.com/registas-hub/ho
 ## Build from source
 
 ### Prerequisites
-- macOS 11 +
+- macOS 14 + (Sonoma — required by ScreenCaptureKit's macOS 14 API used in the Capture module)
 - Swift toolchain (`xcode-select --install`)
 
 ### Build & run
