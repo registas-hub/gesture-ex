@@ -77,6 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // EventTapController.swallowAndBalance가 in-flight로 mouse hardware ↔ cursor
+        // 분리 상태(`CGAssociateMouseAndMouseCursorPosition(0)`)를 남긴 채 종료될 수 있다.
+        // 정상 종료 경로에서는 명시적으로 재결합해 시스템 전역 상태가 잔존하지 않도록 한다.
+        // (강제 종료/크래시 시에는 OS가 CGS connection 정리로 회복한다.)
+        CGAssociateMouseAndMouseCursorPosition(1)
+        EventTapController.shared.stop()
+    }
+
     // MARK: - NSMenuDelegate
 
     /// 메뉴가 열리기 직전에 frontmost 앱 정보를 갱신한다.
