@@ -117,6 +117,10 @@ final class EventTapController {
         self.runLoopSource = nil
         self.pendingDown = nil
         self.isRunning = false
+
+        // swallowAndBalance가 in-flight 분리 상태(mouse hardware ↔ cursor)를 남긴 채
+        // tap이 정지되는 corner case 방어. idempotent하므로 이미 결합 상태여도 안전.
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -251,19 +255,51 @@ final class EventTapController {
     }
 
     /// 우버튼 down/up을 모두 swallow하는 분기에서 사용. HID tap suppression만으로는
-    /// WindowServer/AppKit의 `pressedMouseButtons` 캐시에 right=pressed가 잔존하여
-    /// Chromium NSDraggingSession이 후속 좌드래그를 "좌+우 동시 held"로 오인하고
-    /// release를 매칭하지 못하는 stuck 버그가 발생한다. 합성 right-up 1발을
-    /// SYNTHETIC_TAG로 발사해 캐시를 정상화한다.
-    private func swallowAndBalance(at location: CGPoint) -> Unmanaged<CGEvent>? {
+    /// WindowServer의 mouse-tracking state machine이 "down/up cycle을 본 적 없는"
+    /// 디싱크 상태로 남아 후속 좌버튼 down/up 매칭이 망가지고 NSDraggingSession도
+    /// "좌+우 동시 held"로 오인해 release를 매칭하지 못하는 stuck 버그가 발생한다.
+    ///
+    /// 합성 right-down + right-up 한 cycle을 화면 밖 좌표에 발사해 정상 cycle을
+    /// 시스템에 주입한다. 화면 밖이라 어떤 앱도 hit-test에 걸리지 않아 컨텍스트
+    /// 메뉴는 뜨지 않는다. CGEvent의 mouseCursorPosition은 button event라도
+    /// cursor를 warping시키므로 다음 race 방어를 적용한다:
+    ///
+    /// 1. 발사 직전 `CGAssociateMouseAndMouseCursorPosition(0)`으로 mouse hardware와
+    ///    cursor를 분리해 합성 이벤트의 cursor warping을 차단한다.
+    /// 2. 발사 직후 동기적으로 `CGWarpMouseCursorPosition(cursor)`로 1차 복원.
+    /// 3. **재결합과 2차 복원은 다음 run loop tick까지 유보**한다. 합성 이벤트가
+    ///    callback 반환 후 비동기로 처리되더라도 그 시점에 분리 상태이므로 cursor
+    ///    영향 없음. 다음 tick에서 한 번 더 cursor를 못 박고 재결합한다.
+    ///
+    /// 이 패턴이 disassociation을 즉시 재결합하던 이전 시도의 race를 차단한다.
+    private func swallowAndBalance(at cursor: CGPoint) -> Unmanaged<CGEvent>? {
+        let offscreen = CGPoint(x: -10_000, y: -10_000)
         let source = CGEventSource(stateID: .combinedSessionState)
+
+        CGAssociateMouseAndMouseCursorPosition(0)
+
+        if let synthDown = CGEvent(mouseEventSource: source,
+                                    mouseType: .rightMouseDown,
+                                    mouseCursorPosition: offscreen,
+                                    mouseButton: .right) {
+            synthDown.setIntegerValueField(.eventSourceUserData, value: Self.SYNTHETIC_TAG)
+            synthDown.post(tap: .cghidEventTap)
+        }
         if let synthUp = CGEvent(mouseEventSource: source,
                                   mouseType: .rightMouseUp,
-                                  mouseCursorPosition: location,
+                                  mouseCursorPosition: offscreen,
                                   mouseButton: .right) {
             synthUp.setIntegerValueField(.eventSourceUserData, value: Self.SYNTHETIC_TAG)
             synthUp.post(tap: .cghidEventTap)
         }
+
+        CGWarpMouseCursorPosition(cursor)
+
+        DispatchQueue.main.async {
+            CGWarpMouseCursorPosition(cursor)
+            CGAssociateMouseAndMouseCursorPosition(1)
+        }
+
         return nil
     }
 }
